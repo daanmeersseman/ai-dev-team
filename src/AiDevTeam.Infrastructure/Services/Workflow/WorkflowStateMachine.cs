@@ -69,9 +69,10 @@ public class WorkflowStateMachine : IWorkflowStateMachine
 
             WorkflowState.Reviewing => outcome.ReviewDecision switch
             {
-                ReviewDecision.Approved when outcome.HasSuggestions => WorkflowState.WaitingForInput,
                 ReviewDecision.Approved => WorkflowState.Testing,
-                ReviewDecision.ApprovedWithSuggestions => WorkflowState.WaitingForInput,
+                // Minor suggestions shouldn't block the pipeline — continue to testing.
+                // The reviewer approved the code; suggestions can be addressed later.
+                ReviewDecision.ApprovedWithSuggestions => WorkflowState.Testing,
                 ReviewDecision.ChangesRequired => WorkflowState.ChangesRequested,
                 ReviewDecision.Blocked => WorkflowState.Blocked,
                 _ => WorkflowState.Testing

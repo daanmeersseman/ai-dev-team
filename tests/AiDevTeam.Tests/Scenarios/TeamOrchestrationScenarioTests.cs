@@ -97,13 +97,11 @@ public class TeamOrchestrationScenarioTests
         state = _stateMachine.DetermineNextState(state, coderOutcome);
         Assert.Equal(WorkflowState.Reviewing, state);
 
-        // Second review: approved with suggestions → pauses for user approval
+        // Second review: approved with suggestions → proceeds directly to testing
+        // (minor suggestions don't block the pipeline)
         var review2 = new WorkflowStepOutcome { Success = true, ReviewDecision = ReviewDecision.ApprovedWithSuggestions };
         state = _stateMachine.DetermineNextState(state, review2);
-        Assert.Equal(WorkflowState.WaitingForInput, state);
-
-        // User skips suggestions → proceed to testing
-        state = AssertTransition(state, WorkflowState.Testing);
+        Assert.Equal(WorkflowState.Testing, state);
     }
 
     // ── Scenario: Tests fail, go back to code changes ────────────────

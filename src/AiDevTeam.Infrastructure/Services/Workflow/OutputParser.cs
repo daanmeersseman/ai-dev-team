@@ -59,19 +59,32 @@ public partial class OutputParser : IOutputParser
             }
         }
 
-        // Try parsing the entire output as JSON
-        var trimmed = rawOutput.Trim();
+        // Try parsing the entire output as JSON (after full CLI cleaning)
+        var cleaned = AgentResponseProcessor.CleanProviderOutput(rawOutput);
+        var trimmed = cleaned.Trim();
         if (trimmed.StartsWith('{') && trimmed.EndsWith('}'))
         {
             try
             {
-                var result = JsonSerializer.Deserialize<T>(trimmed, JsonOptions);
+                var normalized = NormalizeCliJson(trimmed);
+                var result = JsonSerializer.Deserialize<T>(normalized, JsonOptions);
                 if (result != null)
                     return ParseResult<T>.Ok(result, rawOutput);
             }
             catch (JsonException)
             {
                 // Fall through to fallback
+            }
+        }
+
+        // Orchestrator-specific fallback: construct a result from free-text prose
+        if (typeof(T) == typeof(OrchestratorResult))
+        {
+            var fallback = BuildOrchestratorFallback(cleaned);
+            if (fallback != null)
+            {
+                _logger.LogInformation("Built fallback OrchestratorResult from free-text output (action: {Action})", fallback.Action);
+                return ParseResult<T>.Ok((T)(object)fallback, rawOutput);
             }
         }
 
@@ -86,9 +99,10 @@ public partial class OutputParser : IOutputParser
 
     private static string? ExtractJsonBlock(string text)
     {
-        // Strip CLI markers (● ✓ ✗ $ ↪) that providers prefix on output lines.
-        // These prevent the ```json fence regex from matching.
-        var cleaned = StripCliMarkers(text);
+        // Use full CLI output cleaning to strip tool-use blocks, markers, and garbled Unicode.
+        // The old StripCliMarkers only handled single-char prefixes; CleanProviderOutput removes
+        // entire tool-use blocks (✓ List directory...\n  ↪ 14 items...) that break fence detection.
+        var cleaned = AgentResponseProcessor.CleanProviderOutput(text);
 
         // Match ```json ... ``` or ``` ... ```
         var match = JsonFenceRegex().Match(cleaned);
@@ -168,23 +182,68 @@ public partial class OutputParser : IOutputParser
     }
 
     /// <summary>
-    /// Strips CLI tool-use markers (● ✓ ✗ $ ↪) from the start of lines
-    /// so that code fences like ```json are not obscured.
+    /// Fallback: when the orchestrator ignores the JSON format and returns free-text prose,
+    /// construct a usable OrchestratorResult from the text content so the workflow doesn't stall.
     /// </summary>
-    private static string StripCliMarkers(string text)
+    private OrchestratorResult? BuildOrchestratorFallback(string cleanedText)
     {
-        var lines = text.Split('\n');
-        for (int i = 0; i < lines.Length; i++)
+        if (string.IsNullOrWhiteSpace(cleanedText) || cleanedText.Length < 20)
+            return null;
+
+        // Use the cleaned text as the chat message
+        var chatMessage = cleanedText.Length > 2000 ? cleanedText[..2000] + "\n...(truncated)" : cleanedText;
+
+        // Detect if this looks like a plan with team assignments
+        var lowerText = cleanedText.ToLowerInvariant();
+        var hasPlanSignals = lowerText.Contains("implement") || lowerText.Contains("test") ||
+                             lowerText.Contains("review") || lowerText.Contains("team assignment") ||
+                             lowerText.Contains("approach:") || lowerText.Contains("plan:");
+
+        // Try to extract planned steps from mentions of agent roles
+        var steps = new List<PlannedStep>();
+        var rolePatterns = new Dictionary<string, string>
         {
-            var trimmed = lines[i].TrimStart();
-            if (trimmed.StartsWith("● "))
-                lines[i] = trimmed[2..];
-            else if (trimmed.StartsWith("✓ ") || trimmed.StartsWith("✗ ") || trimmed.StartsWith("↪ "))
-                lines[i] = trimmed[2..];
-            else if (trimmed.StartsWith("$ "))
-                lines[i] = trimmed[2..];
+            { "coder", "Coder" }, { "sam", "Coder" },
+            { "reviewer", "Reviewer" }, { "morgan", "Reviewer" },
+            { "tester", "Tester" }, { "riley", "Tester" },
+            { "database", "DatabaseSpecialist" }, { "jordan", "DatabaseSpecialist" }
+        };
+
+        var foundRoles = new HashSet<string>();
+        foreach (var (pattern, role) in rolePatterns)
+        {
+            if (lowerText.Contains(pattern) && foundRoles.Add(role))
+            {
+                steps.Add(new PlannedStep
+                {
+                    Order = steps.Count + 1,
+                    AgentRole = role,
+                    Description = $"Execute {role.ToLowerInvariant()} tasks as described in the plan",
+                    IsOptional = role == "DatabaseSpecialist"
+                });
+            }
         }
-        return string.Join('\n', lines);
+
+        if (hasPlanSignals && steps.Count > 0)
+        {
+            _logger.LogInformation("Fallback: detected plan with {StepCount} agent assignments from free-text", steps.Count);
+            return new OrchestratorResult
+            {
+                Action = OrchestratorAction.ProposePlan,
+                Summary = CreateFallbackSummary(cleanedText),
+                ChatMessage = chatMessage,
+                Plan = cleanedText,
+                PlannedSteps = steps
+            };
+        }
+
+        // No plan detected — treat as a chat response so the user at least sees the output
+        return new OrchestratorResult
+        {
+            Action = OrchestratorAction.ChatResponse,
+            Summary = CreateFallbackSummary(cleanedText),
+            ChatMessage = chatMessage
+        };
     }
 
     [GeneratedRegex(@"```json\s*\n([\s\S]*?)```", RegexOptions.Multiline)]

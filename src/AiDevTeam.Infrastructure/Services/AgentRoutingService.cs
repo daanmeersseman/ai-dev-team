@@ -88,6 +88,11 @@ public class AgentRoutingService : IAgentRoutingService
                 var contextPrompt = await _promptService.BuildContextAwarePromptAsync(conversationId, orchestrator, userMessage);
                 var systemPrompt = await _promptService.BuildSystemPromptAsync(conversationId, orchestrator, allAgents);
 
+                // Orchestrator should NEVER use CLI tools — enforce empty AllowedTools
+                var allowedTools = orchestrator.AllowedTools;
+                if (!orchestrator.CanExecuteCommands && allowedTools == null)
+                    allowedTools = new List<string>();
+
                 var request = new AgentRunRequest
                 {
                     Prompt = contextPrompt,
@@ -98,7 +103,9 @@ public class AgentRoutingService : IAgentRoutingService
                     DefaultArguments = orchestrator.DefaultArguments,
                     WorkingDirectory = _artifactService.GetArtifactDirectory(conversationId),
                     TimeoutSeconds = orchestrator.TimeoutSeconds,
-                    VibeMode = orchestrator.VibeMode
+                    VibeMode = orchestrator.VibeMode,
+                    AllowedTools = allowedTools,
+                    DisallowedTools = orchestrator.DisallowedTools
                 };
 
                 var result = await provider.ExecuteAsync(request, cts.Token);
@@ -478,19 +485,22 @@ public class AgentRoutingService : IAgentRoutingService
                 .ToList();
 
             // Build a combined view of what all parallel agents produced
+            // Clean CLI artifacts from output before passing to the router
             string outputForRouting;
             if (completedAtThisDepth.Count > 1)
             {
                 var parts = completedAtThisDepth.Select(r =>
                 {
-                    var text = r.OutputText?.Length > 600 ? r.OutputText[..600] + "..." : (r.OutputText ?? "");
+                    var cleanText = AgentResponseProcessor.CleanProviderOutput(r.OutputText ?? "");
+                    var text = cleanText.Length > 1200 ? cleanText[..1200] + "..." : cleanText;
                     return $"**{r.AgentName}:**\n{text}";
                 });
                 outputForRouting = string.Join("\n\n---\n\n", parts);
             }
             else
             {
-                outputForRouting = output.Length > 1000 ? output[..1000] + "\n...(truncated)" : output;
+                var cleanOutput = AgentResponseProcessor.CleanProviderOutput(output);
+                outputForRouting = cleanOutput.Length > 2000 ? cleanOutput[..2000] + "\n...(truncated)" : cleanOutput;
             }
 
             // Build chain history so the router knows what's already happened
@@ -575,8 +585,9 @@ public class AgentRoutingService : IAgentRoutingService
             _logger.LogInformation("Chaining to {Targets} at depth {Depth} (tier {Tier})",
                 string.Join(", ", followUpTargets.Select(t => t.Name)), nextDepth, tier);
 
-            // Truncate output for delegation but keep enough for the next agent to act on
-            var outputForChain = output.Length > 2000 ? output[..2000] + "\n...(truncated)" : output;
+            // Clean CLI artifacts and increase context limit so agents don't lose important code
+            var cleanedChainOutput = AgentResponseProcessor.CleanProviderOutput(output);
+            var outputForChain = cleanedChainOutput.Length > 6000 ? cleanedChainOutput[..6000] + "\n...(truncated)" : cleanedChainOutput;
 
             foreach (var target in followUpTargets)
             {
@@ -630,12 +641,12 @@ public class AgentRoutingService : IAgentRoutingService
                 if (hasCoder && !hasReviewer)
                 {
                     missingAgent = agents.FirstOrDefault(a => a.Role == AgentRole.Reviewer);
-                    dispatchReason = "Code was written but never reviewed";
+                    dispatchReason = "Code needs review";
                 }
                 else if (hasCoder && hasReviewer && !hasTester)
                 {
                     missingAgent = agents.FirstOrDefault(a => a.Role == AgentRole.Tester);
-                    dispatchReason = "Code was written and reviewed but never tested";
+                    dispatchReason = "Implementation needs testing";
                 }
 
                 if (missingAgent != null)
@@ -644,15 +655,26 @@ public class AgentRoutingService : IAgentRoutingService
 
                     var toName = missingAgent.Name.Split(' ', '(')[0].Trim();
 
-                    // Build context from the latest coder output
-                    var latestCoderRun = completedRuns
-                        .Where(r => agents.FirstOrDefault(a => a.Name == r.AgentName)?.Role == AgentRole.Coder)
-                        .OrderByDescending(r => r.StartedAt)
-                        .FirstOrDefault();
-                    var context = latestCoderRun?.OutputText ?? "";
-                    var contextTrunc = context.Length > 2000 ? context[..2000] + "..." : context;
+                    // Post a contextual handoff message visible in chat
+                    var fromRole = hasCoder && hasReviewer ? "Reviewer" : "Coder";
+                    var fromAgent = completedRuns.LastOrDefault()?.AgentName ?? "the team";
+                    var action = AgentTextUtilities.GetHandoffAction(
+                        hasCoder && hasReviewer ? AgentRole.Reviewer : AgentRole.Coder,
+                        missingAgent.Role);
+                    await _messageService.AddAsync(conversationId, orchestrator.Name, orchestrator.Role.ToString(),
+                        MessageType.Plan, $"{toName}, your turn — time for {action}.");
 
-                    var chainPrompt = $"The team has been working on a task. Here's the latest code output:\n\n{contextTrunc}\n\n" +
+                    // Build context from the latest relevant output (coder for review, reviewer for test)
+                    var contextRole = missingAgent.Role == AgentRole.Tester ? AgentRole.Reviewer : AgentRole.Coder;
+                    var latestRelevantRun = completedRuns
+                        .Where(r => agents.FirstOrDefault(a => a.Name == r.AgentName)?.Role == contextRole)
+                        .OrderByDescending(r => r.StartedAt)
+                        .FirstOrDefault()
+                        ?? completedRuns.LastOrDefault();
+                    var context = latestRelevantRun?.OutputText ?? "";
+                    var contextTrunc = context.Length > 4000 ? context[..4000] + "..." : context;
+
+                    var chainPrompt = $"The team has been working on a task. Here's the latest output from {latestRelevantRun?.AgentName ?? "the team"}:\n\n{contextTrunc}\n\n" +
                         $"As {missingAgent.Name}, please do your job: {dispatchReason!.ToLowerInvariant()}.";
                     await _executionService.StartRunAsync(conversationId, missingAgent.Id, chainPrompt, maxDepth + 1);
                     return; // Don't summarize yet — the missing step will trigger another summary attempt

@@ -103,9 +103,31 @@ public class CliAgentProvider : IAgentProvider
                 }
             }, cancellationToken);
 
-            // Wait with timeout
+            // Wait with timeout + memory watchdog to prevent OOM crashes
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(request.TimeoutSeconds));
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+            // Memory watchdog: kill process if it exceeds 1.5 GB to prevent system-wide OOM
+            const long maxMemoryBytes = 1_500_000_000; // 1.5 GB
+            var memoryWatchdog = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!linkedCts.Token.IsCancellationRequested && !process.HasExited)
+                    {
+                        await Task.Delay(3000, linkedCts.Token);
+                        process.Refresh();
+                        if (!process.HasExited && process.WorkingSet64 > maxMemoryBytes)
+                        {
+                            _logger.LogWarning("Agent process exceeded memory limit ({MemoryMB}MB > {LimitMB}MB), killing",
+                                process.WorkingSet64 / 1_000_000, maxMemoryBytes / 1_000_000);
+                            process.Kill(true);
+                            break;
+                        }
+                    }
+                }
+                catch { /* Process already exited or token cancelled */ }
+            }, linkedCts.Token);
 
             try
             {
@@ -144,6 +166,22 @@ public class CliAgentProvider : IAgentProvider
                 // Log retry attempt
                 _logger.LogWarning("CLI execution failed on attempt {Attempt}, will retry. ExitCode: {ExitCode}, Error: {Error}",
                     attempt, result.ExitCode, result.Error);
+            }
+            catch (TimeoutException ex)
+            {
+                // Don't retry on timeout — if the task didn't fit in the time window,
+                // retrying with the same prompt and timeout will produce the same result.
+                // This prevents 3× timeout waits (e.g. 180s × 3 = 540s) for a single run.
+                sw.Stop();
+                _logger.LogError(ex, "CLI agent timed out on attempt {Attempt}, not retrying", attempt);
+                return new AgentRunResult
+                {
+                    Success = false,
+                    Output = outputBuilder.ToString(),
+                    Error = ex.Message,
+                    ExitCode = -1,
+                    DurationMs = sw.ElapsedMilliseconds
+                };
             }
             catch (Exception ex) when (ex is not OperationCanceledException && attempt < maxRetries)
             {
@@ -340,9 +378,11 @@ public class CliAgentProvider : IAgentProvider
                 }
                 else if (whitelistEmpty)
                 {
-                    // Block all known Copilot tools
-                    args.AddRange(new[] { "--deny-tool", "\"shell\"", "--deny-tool", "\"write\"",
-                        "--deny-tool", "\"read\"", "--deny-tool", "\"edit\"" });
+                    // Block all known Copilot tools — must cover read tools too,
+                    // otherwise the agent browses the filesystem instead of answering
+                    foreach (var tool in new[] { "shell", "write", "read", "edit",
+                        "view", "list", "find", "navigate", "grep", "search", "create", "check" })
+                        args.AddRange(new[] { "--deny-tool", $"\"{tool}\"" });
                 }
                 else if (hasBlacklist)
                 {

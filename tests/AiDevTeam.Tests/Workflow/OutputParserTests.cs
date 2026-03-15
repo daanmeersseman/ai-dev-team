@@ -86,9 +86,11 @@ public class OutputParserTests
 
         var result = _parser.ParseOrchestratorOutput(raw);
 
-        Assert.False(result.Success);
-        Assert.NotNull(result.FallbackSummary);
-        Assert.Contains("controller", result.FallbackSummary!);
+        // Fallback now constructs a ChatResponse from free-text so the workflow doesn't stall
+        Assert.True(result.Success);
+        Assert.NotNull(result.Value);
+        Assert.Equal(OrchestratorAction.ChatResponse, result.Value!.Action);
+        Assert.Contains("controller", result.Value.ChatMessage!);
     }
 
     [Fact]
@@ -411,8 +413,11 @@ public class OutputParserTests
             """;
 
         var result = _parser.ParseOrchestratorOutput(raw);
-        Assert.False(result.Success);
-        Assert.NotNull(result.FallbackSummary);
+        // Malformed JSON can't be deserialized, but the fallback constructs a ChatResponse
+        // from the cleaned text so the workflow doesn't stall
+        Assert.True(result.Success);
+        Assert.NotNull(result.Value);
+        Assert.Equal(OrchestratorAction.ChatResponse, result.Value!.Action);
     }
 
     // ── CLI marker stripping ──────────────────────────────────────────

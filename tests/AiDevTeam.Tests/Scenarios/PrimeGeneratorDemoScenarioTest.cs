@@ -263,23 +263,9 @@ public class PrimeGeneratorDemoScenarioTest
         // ── ACT: Start the workflow ──────────────────────────────────
         var execution = await _engine.StartWorkflowAsync(ConversationId);
 
-        // ── ASSERT: Workflow pauses for suggestions approval ─────────
-        // Morgan approved with niceToHave suggestions → engine asks user for approval
-        Assert.Equal(WorkflowState.WaitingForInput, execution.CurrentState);
-        Assert.Equal(3, callIndex); // Orchestrator + Coder + Reviewer called so far
-
-        // ── ASSERT: Suggestions approval message was posted ──────────
-        var suggestionsMsg = _chatMessages.FirstOrDefault(m =>
-            m.Sender == "Alex (Tech Lead)" && m.MessageType == nameof(MessageType.WorkflowQuestion)
-            && m.Content.Contains("suggestions", StringComparison.OrdinalIgnoreCase));
-        Assert.NotNull(suggestionsMsg);
-        Assert.Contains("XML doc comments", suggestionsMsg!.Content);
-        Assert.Contains("Sam", suggestionsMsg.Content);
-
-        // ── ACT: User says "no" to skip suggestions ─────────────────
-        execution = await _engine.ContinueWorkflowAsync(ConversationId, "No, skip and continue to testing");
-
-        // ── ASSERT: Workflow completed successfully ───────────────────
+        // ── ASSERT: Workflow completed in a single pass ───────────────
+        // Approved reviews (even with niceToHave suggestions) proceed
+        // directly to Testing without pausing for user input.
         Assert.Equal(WorkflowState.Completed, execution.CurrentState);
 
         // ── ASSERT: All 4 agents were called ─────────────────────────
@@ -287,9 +273,9 @@ public class PrimeGeneratorDemoScenarioTest
 
         // ── ASSERT: Chat messages are human-readable ─────────────────
         // Expected: Alex plan, delegation→Sam, Sam result, delegation→Morgan,
-        // Morgan review, suggestions question, delegation→Riley, Riley result, completion
-        Assert.True(_chatMessages.Count >= 9,
-            $"Expected at least 9 chat messages, got {_chatMessages.Count}:\n" +
+        // Morgan review, delegation→Riley, Riley result, completion
+        Assert.True(_chatMessages.Count >= 8,
+            $"Expected at least 8 chat messages, got {_chatMessages.Count}:\n" +
             string.Join("\n", _chatMessages.Select((m, i) => $"  [{i}] {m.Sender}: {Truncate(m.Content, 80)}")));
 
         // ── ASSERT: Alex's plan is the first message and reads naturally ──
@@ -337,9 +323,8 @@ public class PrimeGeneratorDemoScenarioTest
             string.Join(", ", execution.Steps.Select(s => $"{s.AgentRole}={s.Status}")));
 
         // ── ASSERT: Decisions are tracked ────────────────────────────
-        // More decisions now due to suggestions approval flow
-        Assert.True(execution.Decisions.Count >= 7,
-            $"Expected at least 7 decisions, got {execution.Decisions.Count}");
+        Assert.True(execution.Decisions.Count >= 5,
+            $"Expected at least 5 decisions, got {execution.Decisions.Count}");
 
         // ── DIAGNOSTIC: Uncomment to inspect the full chat flow ──────
         // var chatDump = string.Join("\n\n", _chatMessages.Select((m, i) =>

@@ -153,17 +153,19 @@ public class WorkflowStateMachineTests
     }
 
     [Fact]
-    public void DetermineNextState_Reviewing_approved_with_suggestions_goes_to_WaitingForInput()
+    public void DetermineNextState_Reviewing_approved_with_suggestions_goes_to_Testing()
     {
+        // Minor suggestions don't block the pipeline — continue to testing
         var outcome = new WorkflowStepOutcome { Success = true, ReviewDecision = ReviewDecision.ApprovedWithSuggestions };
-        Assert.Equal(WorkflowState.WaitingForInput, _sm.DetermineNextState(WorkflowState.Reviewing, outcome));
+        Assert.Equal(WorkflowState.Testing, _sm.DetermineNextState(WorkflowState.Reviewing, outcome));
     }
 
     [Fact]
-    public void DetermineNextState_Reviewing_approved_with_HasSuggestions_goes_to_WaitingForInput()
+    public void DetermineNextState_Reviewing_approved_with_HasSuggestions_goes_to_Testing()
     {
+        // Approved + suggestions should also continue to testing
         var outcome = new WorkflowStepOutcome { Success = true, ReviewDecision = ReviewDecision.Approved, HasSuggestions = true };
-        Assert.Equal(WorkflowState.WaitingForInput, _sm.DetermineNextState(WorkflowState.Reviewing, outcome));
+        Assert.Equal(WorkflowState.Testing, _sm.DetermineNextState(WorkflowState.Reviewing, outcome));
     }
 
     [Fact]

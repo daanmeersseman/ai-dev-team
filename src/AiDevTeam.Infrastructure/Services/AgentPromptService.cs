@@ -75,19 +75,29 @@ public class AgentPromptService : IAgentPromptService
             sb.AppendLine($"- ALWAYS do your actual work — write the code, write the tests, do the review. Deliver output, not plans.");
             sb.AppendLine($"- NEVER ask meta-questions like \"Which folder?\", \"What framework?\", \"Can I access?\". Just pick the best option and do it.");
             sb.AppendLine($"- NEVER ask for permission. You have full access. Just do the work.");
+            sb.AppendLine();
+            sb.AppendLine("# HONESTY RULES (CRITICAL)");
+            sb.AppendLine("- Be HONEST about what you did. If you wrote code but did NOT execute it, say so clearly.");
+            sb.AppendLine("- NEVER claim tests passed unless you actually ran them and can show real output.");
+            sb.AppendLine("- NEVER fabricate test results, build output, or execution logs.");
+            sb.AppendLine("- If you're writing a test suite, say 'Here is the test suite I wrote' — NOT 'All tests passed'.");
+            sb.AppendLine("- If you're proposing code, say 'Here is my implementation' — NOT 'I deployed this to production'.");
+            sb.AppendLine("- Clearly distinguish between: (a) code you wrote, (b) code you ran, (c) results you observed.");
         }
 
-        // Team roster
-        sb.AppendLine($"\n# YOUR TEAM");
+        // Team roster — emphasized to prevent orchestrator inventing fake members
+        sb.AppendLine($"\n# YOUR TEAM (ONLY these people exist — do NOT invent others)");
+        sb.AppendLine("CRITICAL: These are the ONLY team members. NEVER reference, mention, assign to, or invent anyone not on this list.");
         foreach (var teammate in allAgents)
         {
             var tmFirstName = teammate.Name.Split(' ', '(')[0].Trim();
             if (teammate.Id == agent.Id)
-                sb.AppendLine($"- **{teammate.Name}** — THIS IS YOU");
+                sb.AppendLine($"- **{tmFirstName}** ({teammate.Name}) — THIS IS YOU");
             else
-                sb.AppendLine($"- **{teammate.Name}** ({teammate.Role}): {teammate.Description}");
+                sb.AppendLine($"- **{tmFirstName}** ({teammate.Name}, {teammate.Role}): {teammate.Description}");
         }
         sb.AppendLine("- The **User** is your boss / product owner who gives you tasks.");
+        sb.AppendLine("There are NO other team members. Do not make up names like Sarah, Lisa, Marcus, David, or anyone else.");
 
         // Orchestrator-specific: routing
         if (agent.Role == AgentRole.Orchestrator)

@@ -50,7 +50,7 @@ public class AgentResponseProcessor : IAgentResponseProcessor
                     var agentFirstName = agent.Name.Split(' ', '(')[0].Trim().ToLowerInvariant();
                     var artifactLabel = AgentTextUtilities.GetArtifactLabel(agent.Role);
                     var fileName = $"{agentFirstName}-{artifactLabel}.md";
-                    await _artifactService.CreateAsync(conversationId, fileName, ArtifactType.Markdown, response, agent.Name);
+                    await _artifactService.CreateAsync(conversationId, fileName, ArtifactType.Markdown, chatContent, agent.Name);
                 }
                 catch (Exception ex)
                 {
@@ -173,20 +173,28 @@ public class AgentResponseProcessor : IAgentResponseProcessor
     }
 
     /// <summary>
-    /// Strips CLI/tool-use artefacts (● ✓ $ arrows etc.) that some providers emit,
-    /// keeping only the human-readable prose and code blocks.
+    /// Strips CLI/tool-use artefacts that providers emit, keeping only the
+    /// human-readable prose and code blocks.
+    /// Handles: Claude Code (● ✓ ✗ $ ↪), Copilot CLI tool traces, garbled
+    /// Unicode from encoding mismatches, and tool-use log lines.
     /// </summary>
-    private static string CleanProviderOutput(string raw)
+    public static string CleanProviderOutput(string raw)
     {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+
         var lines = raw.Split('\n');
         var cleaned = new List<string>();
         var inCodeBlock = false;
+        var skipNextIndented = false; // skip indented continuation lines after a tool-use line
 
         foreach (var line in lines)
         {
             // Track code fences so we don't strip content inside them
             if (line.TrimStart().StartsWith("```"))
+            {
                 inCodeBlock = !inCodeBlock;
+                skipNextIndented = false;
+            }
 
             if (inCodeBlock)
             {
@@ -195,21 +203,102 @@ public class AgentResponseProcessor : IAgentResponseProcessor
             }
 
             var trimmed = line.TrimStart();
+
             // Skip lines that look like CLI tool-use output
-            if (trimmed.StartsWith("✓ ") || trimmed.StartsWith("$ ") || trimmed.StartsWith("↪ "))
+            if (trimmed.StartsWith("✓ ") || trimmed.StartsWith("✗ ") ||
+                trimmed.StartsWith("$ ") || trimmed.StartsWith("↪ ") ||
+                trimmed.StartsWith("⟡ "))
+            {
+                skipNextIndented = true;
                 continue;
+            }
+
+            // Skip garbled Unicode markers that appear when CLI output has encoding issues
+            // Common patterns: Ô¹Å (●), Ô£ô (tool marker), Ô£ù (tool marker), Ôå¬ (↪)
+            if (trimmed.StartsWith("\u00D4\u00F9\u00C5") || trimmed.StartsWith("\u00D4\u00A3") ||
+                trimmed.StartsWith("\u00D4\u00E5\u00AC") || trimmed.StartsWith("\u00AD\u0192"))
+            {
+                // Try to extract readable text after the garbled prefix
+                var readableStart = trimmed.IndexOf(' ');
+                if (readableStart > 0 && readableStart < 6)
+                {
+                    var readable = trimmed[(readableStart + 1)..].TrimStart();
+                    if (!string.IsNullOrWhiteSpace(readable) && readable.Length > 5)
+                    {
+                        cleaned.Add(readable);
+                        skipNextIndented = false;
+                        continue;
+                    }
+                }
+                skipNextIndented = true;
+                continue;
+            }
+
+            // Skip indented continuation of tool-use output (e.g., "   ↪ 9 items...")
+            if (skipNextIndented && trimmed.Length > 0 && line.Length > 0 && line[0] == ' ' && !trimmed.StartsWith("●") && !trimmed.StartsWith("-") && !trimmed.StartsWith("*"))
+            {
+                // Check if this looks like tool output continuation
+                if (trimmed.StartsWith("↪") || trimmed.StartsWith("Permission denied") ||
+                    trimmed.StartsWith("Unhandled error") || trimmed.StartsWith("List ") ||
+                    trimmed.StartsWith("View ") || trimmed.StartsWith("Check ") ||
+                    trimmed.StartsWith("Create ") || trimmed.StartsWith("Navigate ") ||
+                    trimmed.StartsWith("Find "))
+                    continue;
+            }
+
+            skipNextIndented = false;
 
             // Strip leading ● bullet that Claude Code prefixes on prose
             if (trimmed.StartsWith("● "))
             {
-                cleaned.Add(line.Replace("● ", ""));
+                cleaned.Add(trimmed[2..]);
                 continue;
             }
+
+            // Skip lines that are pure tool-use traces (e.g., "List directory ...", "View README.md")
+            if (IsToolUseLine(trimmed))
+                continue;
 
             cleaned.Add(line);
         }
 
-        return string.Join("\n", cleaned).Trim();
+        // Collapse excessive blank lines
+        var result = string.Join("\n", cleaned).Trim();
+        while (result.Contains("\n\n\n"))
+            result = result.Replace("\n\n\n", "\n\n");
+
+        return result;
+    }
+
+    /// <summary>
+    /// Detects lines that are CLI tool-use trace logs rather than agent prose.
+    /// </summary>
+    private static bool IsToolUseLine(string trimmed)
+    {
+        if (string.IsNullOrWhiteSpace(trimmed)) return false;
+
+        // Common Claude Code / Copilot tool-use line patterns
+        var toolPatterns = new[]
+        {
+            "List directory ",
+            "View ",
+            "Check current directory",
+            "Navigate to ",
+            "Create ",
+            "Read file ",
+            "Search for ",
+            "Edit file ",
+            "Run command ",
+            "$ Get-Location",
+            "$ Set-Location",
+            "$ Get-ChildItem",
+            "$ cd ",
+            "$ dir ",
+            "$ ls ",
+            "Permission denied and could not request permission"
+        };
+
+        return toolPatterns.Any(p => trimmed.StartsWith(p, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string ExtractBriefChatMessage(string response)

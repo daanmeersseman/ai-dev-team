@@ -167,12 +167,18 @@ public class PromptBuilder : IPromptBuilder
         sb.AppendLine("## Required Response Format");
         sb.AppendLine(input.ExpectedOutputFormat);
 
-        // Reinforce no-tool constraint in task prompt for orchestrators
+        // Reinforce no-tool constraint in task prompt for orchestrators and testers
         if (agent.Role == AgentRole.Orchestrator)
         {
             sb.AppendLine();
             sb.AppendLine("## REMINDER");
             sb.AppendLine("Do NOT use tools, browse files, run commands, or access the filesystem. Work ONLY with the context above. Your entire response must be a single ```json block.");
+        }
+        else if (agent.Role == AgentRole.Tester)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## REMINDER");
+            sb.AppendLine("Do NOT create projects, run `dotnet` commands, or execute code. Analyze the code from the context above and report your test assessment as a single ```json block. Only run actual tests if the task context EXPLICITLY asks you to execute them.");
         }
 
         return sb.ToString().TrimEnd();
@@ -264,12 +270,16 @@ public class PromptBuilder : IPromptBuilder
         """;
 
     private static string BuildTesterFormat() => """
-        Respond with a JSON block inside ```json fences. Use this exact structure:
+        IMPORTANT: Do NOT create .NET projects, run `dotnet` commands, compile code, or execute anything.
+        Analyze the code artifacts provided in the context above and write your test assessment based on code review.
+        If the task context explicitly asks you to run tests, you may do so. Otherwise, assess testability and correctness by reading the code.
+
+        Respond with ONLY a JSON block inside ```json fences. No text before or after it. Use this exact structure:
 
         ```json
         {
           "decision": "AllPassed | SomeFailed | Blocked",
-          "summary": "Test execution summary",
+          "summary": "Test assessment summary — what you tested and how",
           "testsPassed": 5,
           "testsFailed": 1,
           "testsSkipped": 0,

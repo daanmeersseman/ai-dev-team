@@ -129,6 +129,19 @@ public class AgentExecutionService : IAgentExecutionService
             var contextPrompt = await _promptService.BuildContextAwarePromptAsync(conversationId, agent, prompt);
             var systemPrompt = await _promptService.BuildSystemPromptAsync(conversationId, agent, allAgents);
 
+            // Enforce tool restrictions based on agent permissions.
+            // When canExecuteCommands is false, actively block all tool use
+            // so the CLI agent cannot browse filesystems or run shell commands.
+            var allowedTools = agent.AllowedTools;
+            var disallowedTools = agent.DisallowedTools;
+
+            if (!agent.CanExecuteCommands && allowedTools == null && disallowedTools == null)
+            {
+                // Agent should not execute commands — set empty AllowedTools to block all tools
+                allowedTools = new List<string>();
+                _logger.LogInformation("Agent {Agent} has canExecuteCommands=false, blocking all CLI tools", agent.Name);
+            }
+
             var request = new AgentRunRequest
             {
                 Prompt = contextPrompt,
@@ -140,8 +153,8 @@ public class AgentExecutionService : IAgentExecutionService
                 WorkingDirectory = _artifactService.GetArtifactDirectory(conversationId),
                 TimeoutSeconds = agent.TimeoutSeconds,
                 VibeMode = agent.VibeMode,
-                AllowedTools = agent.AllowedTools,
-                DisallowedTools = agent.DisallowedTools
+                AllowedTools = allowedTools,
+                DisallowedTools = disallowedTools
             };
 
             _logger.LogInformation("Executing {Agent} with prompt length: {PromptLength}, system prompt length: {SystemPromptLength}",
@@ -217,8 +230,12 @@ public class AgentExecutionService : IAgentExecutionService
             // Update rolling context
             await _responseProcessor.UpdateAgentContextAsync(conversationId, agent, prompt, result.Output?.Trim() ?? "", result.Success);
 
-            // Agent-to-agent chaining — ask orchestrator if anyone else should act next
-            if (result.Success && agent.Role != AgentRole.Orchestrator && chainDepth < MaxChainDepth)
+            // Agent-to-agent chaining — ask orchestrator if anyone else should act next.
+            // Skip chaining when running in workflow mode (skipChatMessage=true) because
+            // the workflow engine manages the Coder→Reviewer→Tester pipeline via its state machine.
+            // Without this guard, both the workflow engine AND chaining dispatch the next agent,
+            // causing duplicate runs (e.g. Morgan runs twice, Riley runs twice).
+            if (result.Success && agent.Role != AgentRole.Orchestrator && chainDepth < MaxChainDepth && !skipChatMessage)
             {
                 var routingService = _serviceProvider.GetRequiredService<IAgentRoutingService>();
                 await routingService.RequestFollowUpRoutingAsync(conversationId, agent.Id, runId, result.Output ?? "", chainDepth);
