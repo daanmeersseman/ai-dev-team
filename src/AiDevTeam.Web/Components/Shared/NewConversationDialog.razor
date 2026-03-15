@@ -1,0 +1,206 @@
+@inject IConversationService ConversationService
+@inject IMessageService MessageService
+@inject IGitHubIssueService GitHubIssueService
+@inject ITeamService TeamService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">New Conversation</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Row="true" Class="mb-4" Spacing="2">
+            <MudButton Variant="@(_mode == Mode.Manual ? Variant.Filled : Variant.Outlined)"
+                       Color="Color.Primary" OnClick="() => _mode = Mode.Manual"
+                       StartIcon="@Icons.Material.Filled.Edit" Style="flex: 1;">
+                Manual
+            </MudButton>
+            <MudButton Variant="@(_mode == Mode.GitHubIssue ? Variant.Filled : Variant.Outlined)"
+                       Color="Color.Primary" OnClick="() => _mode = Mode.GitHubIssue"
+                       StartIcon="@Icons.Material.Filled.Link" Style="flex: 1;">
+                GitHub Issue
+            </MudButton>
+        </MudStack>
+
+        @if (_mode == Mode.GitHubIssue)
+        {
+            <MudTextField @bind-Value="_issueUrl" Label="GitHub Issue URL" Variant="Variant.Outlined" Class="mb-3"
+                          Placeholder="https://github.com/owner/repo/issues/123" Required="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Link" />
+
+            @if (_isLoading)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">Fetching issue details...</MudText>
+            }
+            else if (_issueInfo != null)
+            {
+                <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3">
+                    Issue fetched: <b>@_issueInfo.Title</b> (#@_issueInfo.Number)
+                </MudAlert>
+            }
+            else if (_fetchError != null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_fetchError</MudAlert>
+            }
+
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="FetchIssue" Class="mb-3"
+                       Disabled="@(string.IsNullOrWhiteSpace(_issueUrl) || _isLoading)"
+                       StartIcon="@Icons.Material.Filled.Download">
+                Fetch Issue
+            </MudButton>
+
+            @if (_issueInfo != null)
+            {
+                <MudTextField @bind-Value="_title" Label="Title" Variant="Variant.Outlined" Class="mb-3" Required="true" />
+                <MudTextField @bind-Value="_description" Label="Description" Variant="Variant.Outlined" Lines="2" Class="mb-3" />
+            }
+        }
+        else
+        {
+            <MudTextField @bind-Value="_title" Label="Title" Variant="Variant.Outlined" Class="mb-3" Required="true" />
+            <MudTextField @bind-Value="_description" Label="Description" Variant="Variant.Outlined" Lines="3" Class="mb-3" />
+        }
+
+        @if (_teams.Any())
+        {
+            <MudSelect T="string" @bind-Value="_teamId" Label="Team" Variant="Variant.Outlined" Class="mb-3"
+                       Clearable="true" Placeholder="All agents">
+                @foreach (var team in _teams)
+                {
+                    <MudSelectItem Value="@team.Id">@team.Name</MudSelectItem>
+                }
+            </MudSelect>
+        }
+
+        <MudSelect T="Priority" @bind-Value="_priority" Label="Priority" Variant="Variant.Outlined" Class="mb-3">
+            @foreach (var p in Enum.GetValues<Priority>())
+            {
+                <MudSelectItem Value="p">@p</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField @bind-Value="_tags" Label="Tags (comma-separated)" Variant="Variant.Outlined"
+                      Placeholder="e.g., backend, bug-fix, feature" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit"
+                   Disabled="@(!CanSubmit)">
+            @if (_isAnalyzing)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                @:Creating...
+            }
+            else
+            {
+                @:Create
+            }
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private enum Mode { Manual, GitHubIssue }
+    private Mode _mode = Mode.Manual;
+
+    private string _title = string.Empty;
+    private string _description = string.Empty;
+    private Priority _priority = Priority.Medium;
+    private string _tags = string.Empty;
+    private string _issueUrl = string.Empty;
+    private string? _teamId;
+    private List<Team> _teams = new();
+    private GitHubIssueInfo? _issueInfo;
+    private string? _fetchError;
+    private bool _isLoading;
+    private bool _isAnalyzing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _teams = await TeamService.GetAllAsync();
+    }
+
+    private bool CanSubmit => !string.IsNullOrWhiteSpace(_title) && !_isLoading && !_isAnalyzing
+                              && (_mode == Mode.Manual || _issueInfo != null);
+
+    private async Task FetchIssue()
+    {
+        _isLoading = true;
+        _fetchError = null;
+        _issueInfo = null;
+        StateHasChanged();
+
+        try
+        {
+            _issueInfo = await GitHubIssueService.FetchIssueAsync(_issueUrl);
+            if (_issueInfo == null)
+            {
+                _fetchError = "Could not fetch issue. Check the URL and ensure 'gh' CLI is authenticated.";
+            }
+            else
+            {
+                // Generate a short title and description from the issue
+                _title = _issueInfo.Title.Length > 80
+                    ? _issueInfo.Title[..77] + "..."
+                    : _issueInfo.Title;
+                _description = $"[{_issueInfo.Repository}#{_issueInfo.Number}] {(_issueInfo.Body.Length > 200 ? _issueInfo.Body[..197] + "..." : _issueInfo.Body)}";
+                _tags = string.Join(",", _issueInfo.Labels.Take(5));
+            }
+        }
+        catch (Exception ex)
+        {
+            _fetchError = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task Submit()
+    {
+        _isAnalyzing = _mode == Mode.GitHubIssue && _issueInfo != null;
+        StateHasChanged();
+
+        try
+        {
+            var conversation = await ConversationService.CreateAsync(_title, _description, _priority,
+                string.IsNullOrWhiteSpace(_tags) ? null : _tags, _teamId);
+
+            if (_mode == Mode.GitHubIssue && _issueInfo != null)
+            {
+                // Add the issue link as a system message
+                await MessageService.AddAsync(conversation.Id, "System", "System", MessageType.SystemEvent,
+                    $"Linked to GitHub issue: [{_issueInfo.Repository}#{_issueInfo.Number}]({_issueInfo.Url})");
+
+                // Run the analysis in background — post result as first real message
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var analysis = await GitHubIssueService.AnalyzeIssueAsync(_issueInfo);
+                        await MessageService.AddAsync(conversation.Id, "Copilot", "System",
+                            MessageType.AgentThoughtSummary, $"## Issue Analysis\n\n{analysis}");
+                    }
+                    catch
+                    {
+                        await MessageService.AddAsync(conversation.Id, "System", "System",
+                            MessageType.SystemEvent, "Issue analysis could not be completed.");
+                    }
+                });
+
+                Snackbar.Add("Issue analysis running in background...", Severity.Info);
+            }
+
+            MudDialog.Close(DialogResult.Ok(conversation));
+        }
+        finally
+        {
+            _isAnalyzing = false;
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

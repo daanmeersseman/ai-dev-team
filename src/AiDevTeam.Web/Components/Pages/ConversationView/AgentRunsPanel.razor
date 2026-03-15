@@ -1,0 +1,119 @@
+@if (Runs.Any())
+{
+    <MudPaper Elevation="2" Class="mt-2" Style="flex-shrink: 0;">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="pa-2 cursor-pointer"
+                  @onclick="() => _runsExpanded = !_runsExpanded">
+            <MudIcon Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" />
+            <MudText Typo="Typo.subtitle2">Recent Runs</MudText>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@Runs.Count</MudChip>
+            <MudSpacer />
+            <MudIcon Icon="@(_runsExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small" />
+        </MudStack>
+
+        @if (_runsExpanded)
+        {
+            <MudDivider />
+            <div style="max-height: 250px; overflow-y: auto;">
+                @foreach (var run in Runs.Take(10))
+                {
+                    var agentDef = Agents.FirstOrDefault(a => a.Name == run.AgentName);
+                    var agentColor = agentDef?.Color ?? "#CDD6F4";
+                    var isRunExpanded = _expandedRuns.Contains(run.Id);
+                    var runMessages = Messages.Where(m => m.AgentRunId == run.Id).OrderBy(m => m.CreatedAt).ToList();
+
+                    <MudPaper Elevation="0" Class="mx-2 mb-1" Style="background: #181825; border-radius: 6px;">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="pa-2 cursor-pointer"
+                                  @onclick="() => ToggleRunExpanded(run.Id)">
+                            @if (agentDef != null)
+                            {
+                                <MudAvatar Size="Size.Small" Style="@($"background-color: {agentColor}; width:24px; height:24px; font-size:0.65rem;")">
+                                    @(agentDef.AvatarInitials ?? agentDef.Name[..1])
+                                </MudAvatar>
+                            }
+                            <MudText Typo="Typo.body2" Style="@($"color: {agentColor}; font-weight: 600;")">@(run.AgentName ?? "Unknown")</MudText>
+                            <span class="run-@run.Status.ToString().ToLowerInvariant()" style="font-size: 0.75rem; font-weight: 600;">@run.Status</span>
+                            <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
+                                @(run.DurationMs.HasValue ? $"{run.DurationMs}ms" : "...") &middot;
+                                @run.StartedAt.ToLocalTime().ToString("HH:mm:ss")
+                                @if (run.ChainDepth > 0) { <text> &middot; chain @run.ChainDepth</text> }
+                            </MudText>
+                            <MudSpacer />
+                            @if (run.Status == AgentRunStatus.Running)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Cancel" Size="Size.Small"
+                                               OnClick="() => OnCancelRun.InvokeAsync(run.Id)" Color="Color.Error" />
+                            }
+                            <MudIcon Icon="@(isRunExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small" />
+                        </MudStack>
+
+                        @if (isRunExpanded)
+                        {
+                            <MudDivider />
+                            <div class="pa-2" style="font-size: 0.8rem;">
+                                @if (!string.IsNullOrEmpty(run.InputPrompt))
+                                {
+                                    <div class="mb-2">
+                                        <MudText Typo="Typo.caption" Style="color: #89B4FA; font-weight: 600;">Input</MudText>
+                                        <pre class="cli-output" style="max-height: 120px; overflow-y: auto;">@run.InputPrompt</pre>
+                                    </div>
+                                }
+
+                                @if (runMessages.Any())
+                                {
+                                    <MudText Typo="Typo.caption" Style="color: #A6E3A1; font-weight: 600;" Class="mb-1">Actions (@runMessages.Count)</MudText>
+                                    @foreach (var msg in runMessages)
+                                    {
+                                        <div class="mb-1 pa-1" style="background: #11111B; border-radius: 4px; border-left: 2px solid @agentColor;">
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                                <span class="badge" style="font-size: 0.65rem;">@msg.Type</span>
+                                                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">@msg.CreatedAt.ToLocalTime().ToString("HH:mm:ss")</MudText>
+                                            </MudStack>
+                                            <MudText Typo="Typo.caption" Style="white-space: pre-wrap; word-break: break-word;">@Truncate(msg.Content, 300)</MudText>
+                                        </div>
+                                    }
+                                }
+
+                                @if (!string.IsNullOrEmpty(run.OutputText))
+                                {
+                                    <div class="mt-2">
+                                        <MudText Typo="Typo.caption" Style="color: #F9E2AF; font-weight: 600;">Raw Output</MudText>
+                                        <pre class="cli-output" style="max-height: 200px; overflow-y: auto;">@run.OutputText</pre>
+                                    </div>
+                                }
+                                @if (!string.IsNullOrEmpty(run.ErrorText))
+                                {
+                                    <div class="mt-2">
+                                        <MudText Typo="Typo.caption" Style="color: #F38BA8; font-weight: 600;">Error</MudText>
+                                        <pre class="cli-output cli-error">@run.ErrorText</pre>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </MudPaper>
+                }
+            </div>
+        }
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public List<AgentRun> Runs { get; set; } = new();
+    [Parameter] public List<AgentDefinition> Agents { get; set; } = new();
+    [Parameter] public List<Message> Messages { get; set; } = new();
+    [Parameter] public EventCallback<string> OnCancelRun { get; set; }
+
+    private bool _runsExpanded;
+    private HashSet<string> _expandedRuns = new();
+
+    private void ToggleRunExpanded(string runId)
+    {
+        if (!_expandedRuns.Remove(runId))
+            _expandedRuns.Add(runId);
+    }
+
+    private static string Truncate(string text, int max)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= max) return text ?? "";
+        return text[..max] + "...";
+    }
+}

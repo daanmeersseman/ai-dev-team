@@ -1,0 +1,70 @@
+@using System.Text.RegularExpressions
+@inject IMarkdownService MarkdownService
+
+<div id="chat-scroll-container" class="chat-container" style="flex: 1; overflow-y: auto;">
+    @foreach (var msg in Messages)
+    {
+        var agentDef = Agents.FirstOrDefault(a => a.Name == msg.Sender);
+        var color = agentDef?.Color ?? GetSenderColor(msg.SenderRole);
+        <div class="chat-message @GetMessageCssClass(msg.SenderRole)" style="border-left-color: @color;">
+            <div>
+                @if (agentDef != null)
+                {
+                    <MudAvatar Size="Size.Small" Style="@($"background-color: {color}; width:28px; height:28px; font-size:0.7rem;")">
+                        @(agentDef.AvatarInitials ?? agentDef.Name[..1])
+                    </MudAvatar>
+                }
+            </div>
+            <div style="flex: 1;">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <span class="sender" style="color: @color;">@msg.Sender</span>
+                    <span class="badge">@msg.Type</span>
+                    <MudSpacer />
+                    <span class="timestamp">@msg.CreatedAt.ToLocalTime().ToString("HH:mm:ss")</span>
+                </MudStack>
+                <div class="content markdown-body">
+                    @((MarkupString)RenderMessageContent(msg.Content))
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public List<Message> Messages { get; set; } = new();
+    [Parameter] public List<AgentDefinition> Agents { get; set; } = new();
+    [Parameter] public Dictionary<string, ContextBlock> ContextBlocks { get; set; } = new();
+    [Parameter] public EventCallback<string> OnContextBlockClick { get; set; }
+
+    private string RenderMessageContent(string content)
+    {
+        if (string.IsNullOrEmpty(content)) return string.Empty;
+
+        var result = Regex.Replace(content, @"\[\[block:([^:]+):([^\]]+)\]\]", match =>
+        {
+            var blockId = match.Groups[1].Value;
+            var label = match.Groups[2].Value;
+            var exists = ContextBlocks.ContainsKey(blockId);
+            if (exists)
+                return $"<span class=\"context-ref\" onclick=\"window.chatInterop.showContextBlock('{blockId}')\">&#x1F4CE; {System.Net.WebUtility.HtmlEncode(label)}</span>";
+            else
+                return $"<span class=\"context-ref disabled\">&#x1F4CE; {System.Net.WebUtility.HtmlEncode(label)}</span>";
+        });
+
+        return MarkdownService.RenderToSafeHtml(result);
+    }
+
+    internal static string GetMessageCssClass(string role) => role.ToLowerInvariant() switch
+    {
+        "user" => "user", "orchestrator" => "orchestrator", "coder" => "coder",
+        "reviewer" => "reviewer", "tester" => "tester",
+        "databasespecialist" => "database", "system" => "system", _ => ""
+    };
+
+    internal static string GetSenderColor(string role) => role.ToLowerInvariant() switch
+    {
+        "user" => "#89B4FA", "orchestrator" => "#F9E2AF", "coder" => "#A6E3A1",
+        "reviewer" => "#CBA6F7", "tester" => "#F38BA8",
+        "databasespecialist" => "#FAB387", "system" => "#6C7086", _ => "#CDD6F4"
+    };
+}

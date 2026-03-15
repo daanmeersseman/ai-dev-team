@@ -1,0 +1,68 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="_theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1" Dense="true">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="ToggleDrawer" />
+        <MudText Typo="Typo.h6" Class="ml-2">AI Dev Team</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" Href="/settings" />
+        <MudIconButton Icon="@Icons.Material.Filled.HealthAndSafety" Color="Color.Inherit" Href="/diagnostics" />
+        <MudIconButton Icon="@Icons.Material.Filled.SmartToy" Color="Color.Inherit" Href="/agents" />
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2" Variant="DrawerVariant.Mini" OpenMiniOnHover="true">
+        <MudNavMenu>
+            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+            <MudNavLink Href="/conversations" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Forum">Conversations</MudNavLink>
+            <MudNavLink Href="/agents" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.SmartToy">Agents</MudNavLink>
+            <MudNavLink Href="/teams" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Groups">Teams</MudNavLink>
+            <MudNavLink Href="/diagnostics" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.HealthAndSafety">Diagnostics</MudNavLink>
+            <MudNavLink Href="/settings" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">Settings</MudNavLink>
+        </MudNavMenu>
+    </MudDrawer>
+
+    <MudMainContent Class="pt-14">
+        <MudContainer MaxWidth="MaxWidth.False" Class="pa-4">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+
+    private MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#1976D2",
+            Secondary = "#424242",
+            AppbarBackground = "#1565C0",
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#42A5F5",
+            Secondary = "#B0BEC5",
+            Surface = "#1E1E2E",
+            Background = "#11111B",
+            AppbarBackground = "#181825",
+            DrawerBackground = "#181825",
+            TextPrimary = "#CDD6F4",
+            TextSecondary = "#A6ADC8",
+        },
+        Typography = new Typography
+        {
+            Default = new DefaultTypography
+            {
+                FontFamily = new[] { "Inter", "Segoe UI", "Roboto", "sans-serif" }
+            }
+        }
+    };
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+}

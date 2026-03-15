@@ -1,0 +1,89 @@
+@inject IArtifactService ArtifactService
+@inject IMarkdownService MarkdownService
+
+<MudPaper Elevation="2" Class="artifact-panel">
+    <MudToolBar Dense="true">
+        <MudText Typo="Typo.subtitle2">Artifacts</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="LoadArtifacts" />
+    </MudToolBar>
+    <MudDivider />
+
+    @if (!Artifacts.Any())
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="ma-2">No artifacts yet</MudAlert>
+    }
+    else
+    {
+        <MudList T="Artifact" Dense="true" Class="pa-0">
+            @foreach (var artifact in Artifacts)
+            {
+                <MudListItem T="Artifact" OnClick="() => SelectArtifact(artifact)"
+                             Icon="@GetArtifactIcon(artifact.Type)"
+                             Style="@(_selectedArtifact?.Id == artifact.Id ? "background: #313244;" : "")">
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.body2">@artifact.FileName</MudText>
+                        <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
+                            @(artifact.CreatedByAgent ?? "System") - @artifact.CreatedAt.ToLocalTime().ToString("MMM dd HH:mm")
+                        </MudText>
+                    </MudStack>
+                </MudListItem>
+            }
+        </MudList>
+    }
+
+    @if (_selectedArtifact != null)
+    {
+        <MudDivider />
+        <MudToolBar Dense="true">
+            <MudText Typo="Typo.caption" Style="font-weight: 600;">@_selectedArtifact.FileName</MudText>
+            <MudSpacer />
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                           OnClick="() => { _selectedArtifact = null; _artifactContent = string.Empty; }" />
+        </MudToolBar>
+        <div class="artifact-content markdown-body" style="max-height: 400px; overflow-y: auto;">
+            @if (_selectedArtifact.Type == ArtifactType.Markdown)
+            {
+                @((MarkupString)MarkdownService.RenderToSafeHtml(_artifactContent))
+            }
+            else if (_selectedArtifact.Type == ArtifactType.Json)
+            {
+                <pre><code>@_artifactContent</code></pre>
+            }
+            else
+            {
+                <pre>@_artifactContent</pre>
+            }
+        </div>
+    }
+</MudPaper>
+
+@code {
+    [Parameter] public List<Artifact> Artifacts { get; set; } = new();
+    [Parameter] public EventCallback OnRefreshRequested { get; set; }
+
+    private Artifact? _selectedArtifact;
+    private string _artifactContent = string.Empty;
+
+    private async Task SelectArtifact(Artifact artifact)
+    {
+        _selectedArtifact = artifact;
+        _artifactContent = await ArtifactService.GetContentAsync(artifact.ConversationId, artifact.FileName);
+    }
+
+    private async Task LoadArtifacts()
+    {
+        await OnRefreshRequested.InvokeAsync();
+    }
+
+    private static string GetArtifactIcon(ArtifactType type) => type switch
+    {
+        ArtifactType.Markdown => Icons.Material.Filled.Description,
+        ArtifactType.Json => Icons.Material.Filled.DataObject,
+        ArtifactType.Code => Icons.Material.Filled.Code,
+        ArtifactType.Log => Icons.Material.Filled.Terminal,
+        ArtifactType.Patch => Icons.Material.Filled.Difference,
+        ArtifactType.Image => Icons.Material.Filled.Image,
+        _ => Icons.Material.Filled.InsertDriveFile
+    };
+}

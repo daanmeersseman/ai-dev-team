@@ -1,0 +1,154 @@
+@page "/teams"
+@inject ITeamService TeamService
+@inject IAgentDefinitionService AgentService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>AI Dev Team - Teams</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h5">Teams</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="() => StartEdit(new Team(), true)">New Team</MudButton>
+</MudStack>
+
+@if (_teams == null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (!_teams.Any())
+{
+    <MudAlert Severity="Severity.Info">No teams configured yet. Create one to get started.</MudAlert>
+}
+else
+{
+    <MudGrid>
+        @foreach (var team in _teams)
+        {
+            var teamAgents = _agents.Where(a => team.AgentIds.Contains(a.Id)).ToList();
+            <MudItem xs="12" sm="6" md="4">
+                <MudCard Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">@team.Name</MudText>
+                            <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">@team.Description</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudText Typo="Typo.caption" Class="mb-2" Style="font-weight: 600;">Members (@teamAgents.Count)</MudText>
+                        <MudStack Row="true" Spacing="1" Style="flex-wrap: wrap;">
+                            @foreach (var agent in teamAgents)
+                            {
+                                <MudChip T="string" Size="Size.Small" Style="@($"background-color: {agent.Color}20; color: {agent.Color}; border: 1px solid {agent.Color}40;")">
+                                    @agent.Name.Split(' ', '(')[0].Trim() (@agent.Role)
+                                </MudChip>
+                            }
+                        </MudStack>
+                    </MudCardContent>
+                    <MudCardActions>
+                        <MudButton StartIcon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => StartEdit(team, false)">Edit</MudButton>
+                        <MudSpacer />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="() => DeleteTeam(team)" />
+                    </MudCardActions>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@if (_editing != null)
+{
+    <MudDialog @bind-Visible="_dialogVisible" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+        <TitleContent>
+            <MudText Typo="Typo.h6">@(_isNew ? "New Team" : "Edit Team")</MudText>
+        </TitleContent>
+        <DialogContent>
+            <MudTextField @bind-Value="_editing.Name" Label="Team Name" Variant="Variant.Outlined" Class="mb-3" Required="true" />
+            <MudTextField @bind-Value="_editing.Description" Label="Description" Variant="Variant.Outlined" Lines="2" Class="mb-3" />
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Select Agents</MudText>
+            @foreach (var agent in _agents)
+            {
+                var isSelected = _editing.AgentIds.Contains(agent.Id);
+                <MudCheckBox T="bool" Value="isSelected" Label="@($"{agent.Name} ({agent.Role})")"
+                             ValueChanged="(v) => ToggleAgent(agent.Id, v)" Color="Color.Primary" Dense="true" />
+            }
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="CancelEdit">Cancel</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveTeam"
+                       Disabled="@(string.IsNullOrWhiteSpace(_editing?.Name) || !_editing.AgentIds.Any())">Save</MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@code {
+    private List<Team>? _teams;
+    private List<AgentDefinition> _agents = new();
+    private Team? _editing;
+    private bool _isNew;
+    private bool _dialogVisible;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _agents = await AgentService.GetAllAsync();
+        await LoadTeams();
+    }
+
+    private async Task LoadTeams() => _teams = await TeamService.GetAllAsync();
+
+    private void StartEdit(Team team, bool isNew)
+    {
+        _isNew = isNew;
+        _editing = isNew ? team : new Team
+        {
+            Id = team.Id,
+            Name = team.Name,
+            Description = team.Description,
+            AgentIds = new List<string>(team.AgentIds),
+            CreatedAt = team.CreatedAt
+        };
+        _dialogVisible = true;
+    }
+
+    private void ToggleAgent(string agentId, bool selected)
+    {
+        if (_editing == null) return;
+        if (selected && !_editing.AgentIds.Contains(agentId))
+            _editing.AgentIds.Add(agentId);
+        else if (!selected)
+            _editing.AgentIds.Remove(agentId);
+    }
+
+    private async Task SaveTeam()
+    {
+        if (_editing == null) return;
+        if (_isNew)
+            await TeamService.CreateAsync(_editing);
+        else
+            await TeamService.UpdateAsync(_editing);
+        Snackbar.Add($"Team '{_editing.Name}' saved", Severity.Success);
+        _dialogVisible = false;
+        _editing = null;
+        await LoadTeams();
+    }
+
+    private void CancelEdit()
+    {
+        _dialogVisible = false;
+        _editing = null;
+    }
+
+    private async Task DeleteTeam(Team team)
+    {
+        var confirmed = await DialogService.ShowMessageBox("Delete Team",
+            $"Are you sure you want to delete '{team.Name}'?", yesText: "Delete", cancelText: "Cancel");
+        if (confirmed == true)
+        {
+            await TeamService.DeleteAsync(team.Id);
+            Snackbar.Add($"Team '{team.Name}' deleted", Severity.Success);
+            await LoadTeams();
+        }
+    }
+}

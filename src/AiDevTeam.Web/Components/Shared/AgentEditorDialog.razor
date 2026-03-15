@@ -1,0 +1,132 @@
+@inject IAgentDefinitionService AgentService
+@inject IProviderConfigurationService ProviderService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(IsNew ? "New Agent" : "Edit Agent")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="Agent.Name" Label="Name" Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="AgentRole" @bind-Value="Agent.Role" Label="Role" Variant="Variant.Outlined">
+                    @foreach (var role in Enum.GetValues<AgentRole>())
+                    { <MudSelectItem Value="role">@role</MudSelectItem> }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="Agent.Description" Label="Description" Variant="Variant.Outlined" Lines="2" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="Agent.SystemPrompt" Label="System Prompt" Variant="Variant.Outlined" Lines="3" />
+            </MudItem>
+
+            <MudItem xs="12"><MudDivider Class="my-1" /><MudText Typo="Typo.subtitle2">Character & Communication</MudText></MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="Agent.Personality" Label="Personality" Variant="Variant.Outlined"
+                              Placeholder="e.g., Pragmatic, detail-oriented, slightly formal" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="string" @bind-Value="Agent.CommunicationStyle" Label="Communication Style" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@("professional")">Professional</MudSelectItem>
+                    <MudSelectItem Value="@("casual")">Casual</MudSelectItem>
+                    <MudSelectItem Value="@("terse")">Terse</MudSelectItem>
+                    <MudSelectItem Value="@("verbose")">Verbose</MudSelectItem>
+                    <MudSelectItem Value="@("friendly")">Friendly</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="Agent.CustomInstructions" Label="Custom Instructions" Variant="Variant.Outlined" />
+            </MudItem>
+
+            <MudItem xs="12"><MudDivider Class="my-1" /><MudText Typo="Typo.subtitle2">Provider</MudText></MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="string" Value="Agent.ProviderType" Label="Provider" Variant="Variant.Outlined"
+                           ValueChanged="OnProviderChanged">
+                    <MudSelectItem Value="@("Mock")">Mock (Demo)</MudSelectItem>
+                    @foreach (var p in _providers.Where(p => p.Name != "Mock"))
+                    {
+                        <MudSelectItem Value="@p.Name">
+                            @p.Name @(p.IsDetected ? "(detected)" : "(not found)")
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="Agent.ExecutablePath" Label="Executable Path (optional)" Variant="Variant.Outlined" />
+            </MudItem>
+
+            <MudItem xs="12"><MudDivider Class="my-1" /><MudText Typo="Typo.subtitle2">Appearance</MudText></MudItem>
+            <MudItem xs="4">
+                <MudTextField @bind-Value="Agent.Color" Label="Color (hex)" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="4">
+                <MudTextField @bind-Value="Agent.AvatarInitials" Label="Avatar Initials" Variant="Variant.Outlined" MaxLength="2" />
+            </MudItem>
+            <MudItem xs="4">
+                <MudNumericField @bind-Value="Agent.TimeoutSeconds" Label="Timeout (s)" Variant="Variant.Outlined" Min="30" Max="3600" />
+            </MudItem>
+
+            <MudItem xs="12"><MudDivider Class="my-1" /><MudText Typo="Typo.subtitle2">Performance / Token Optimization</MudText></MudItem>
+            <MudItem xs="6">
+                <MudNumericField @bind-Value="Agent.MaxContextMessages" Label="Context Messages" Variant="Variant.Outlined"
+                                 Min="0" Max="20" HelperText="Recent messages included in prompt (0 = none)" />
+            </MudItem>
+            <MudItem xs="6">
+                <MudNumericField @bind-Value="Agent.MaxContextTokens" Label="Context Token Budget" Variant="Variant.Outlined"
+                                 Min="500" Max="8000" HelperText="Max tokens for rolling context summary" />
+            </MudItem>
+
+            <MudItem xs="12"><MudDivider Class="my-1" /><MudText Typo="Typo.subtitle2">Permissions</MudText></MudItem>
+            <MudItem xs="3"><MudCheckBox @bind-Value="Agent.CanCreateArtifacts" Label="Create Artifacts" Color="Color.Primary" /></MudItem>
+            <MudItem xs="3"><MudCheckBox @bind-Value="Agent.CanTriggerAgents" Label="Trigger Agents" Color="Color.Primary" /></MudItem>
+            <MudItem xs="3"><MudCheckBox @bind-Value="Agent.CanExecuteCommands" Label="Execute Commands" Color="Color.Primary" /></MudItem>
+            <MudItem xs="3">
+                <MudTooltip Text="Auto-approve CLI permission prompts so agents don't get stuck">
+                    <MudCheckBox @bind-Value="Agent.VibeMode" Label="Vibe Mode" Color="Color.Secondary" />
+                </MudTooltip>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save"
+                   Disabled="@string.IsNullOrWhiteSpace(Agent.Name)">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public AgentDefinition Agent { get; set; } = new();
+    [Parameter] public bool IsNew { get; set; }
+
+    private List<ProviderConfiguration> _providers = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _providers = await ProviderService.GetAllAsync();
+    }
+
+    private void OnProviderChanged(string providerType)
+    {
+        Agent.ProviderType = providerType;
+        // Model comes from the provider's DefaultModel in Settings
+        var provider = _providers.FirstOrDefault(p => p.Name == providerType);
+        Agent.ModelName = provider?.DefaultModel;
+    }
+
+    private async Task Save()
+    {
+        if (IsNew)
+            await AgentService.CreateAsync(Agent);
+        else
+            await AgentService.UpdateAsync(Agent);
+        Snackbar.Add($"Agent '{Agent.Name}' saved", Severity.Success);
+        MudDialog.Close(DialogResult.Ok(Agent));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

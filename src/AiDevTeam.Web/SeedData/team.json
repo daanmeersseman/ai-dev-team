@@ -1,0 +1,11 @@
+{
+  "name": "Full Stack Team",
+  "description": "All agents working together: plan, implement, review, test.",
+  "agentNames": [
+    "Alex (Tech Lead)",
+    "Sam (Coder)",
+    "Morgan (Reviewer)",
+    "Riley (Tester)",
+    "Jordan (DB Specialist)"
+  ]
+}

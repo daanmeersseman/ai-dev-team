@@ -1,0 +1,33 @@
+[
+  {
+    "name": "Mock",
+    "isAvailable": true,
+    "isDetected": true,
+    "availableModels": ["mock-v1"],
+    "capabilities": ["Coding", "Reasoning", "Review", "Testing"],
+    "strengthDescription": "Simulated provider for testing and development. Supports all capabilities with mock responses.",
+    "costTier": "Free",
+    "priority": 999
+  },
+  {
+    "name": "ClaudeCli",
+    "capabilities": ["Coding", "Reasoning", "Review", "Testing", "Documentation"],
+    "strengthDescription": "Best for reasoning, architecture analysis, code review, and complex implementation tasks. Strong at following structured output formats.",
+    "costTier": "Standard",
+    "priority": 10
+  },
+  {
+    "name": "CodexCli",
+    "capabilities": ["Coding", "FastTasks"],
+    "strengthDescription": "Optimized for code generation and fast implementation tasks. Good for straightforward coding work.",
+    "costTier": "Low",
+    "priority": 20
+  },
+  {
+    "name": "CopilotCli",
+    "capabilities": ["Coding", "GitHubIntegration", "FastTasks"],
+    "strengthDescription": "Best for GitHub integration (issues, PRs, comments) and quick coding tasks. Native GitHub MCP support.",
+    "costTier": "Low",
+    "priority": 15
+  }
+]

@@ -1,0 +1,89 @@
+<MudPaper Elevation="2" Style="flex-shrink: 0;">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="pa-2 cursor-pointer"
+              @onclick="() => _debugLogExpanded = !_debugLogExpanded">
+        <MudIcon Icon="@Icons.Material.Filled.BugReport" Size="Size.Small" Style="color: #F38BA8;" />
+        <MudText Typo="Typo.subtitle2" Style="color: #F38BA8;">Debug Log</MudText>
+        <MudSpacer />
+        <MudIcon Icon="@(_debugLogExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small" />
+    </MudStack>
+
+    @if (_debugLogExpanded)
+    {
+        <MudDivider />
+        <div style="max-height: 500px; overflow-y: auto; padding: 8px; font-family: 'Cascadia Mono', 'Consolas', monospace; font-size: 0.72rem; line-height: 1.5; background: #11111B;">
+            @foreach (var entry in GetDebugTimeline())
+            {
+                <div style="white-space: pre-wrap; word-break: break-word; padding: 1px 0; border-bottom: 1px solid #1e1e2e;">
+                    <span style="color: #6C7086;">@entry.Time</span>
+                    <span style="color: @entry.Color; font-weight: 600;"> [@entry.Source]</span>
+                    <span style="color: #9399B2;"> @entry.Label</span>
+                    <span style="color: #CDD6F4;"> @entry.Text</span>
+                </div>
+            }
+            @if (!GetDebugTimeline().Any())
+            {
+                <div style="color: #6C7086; padding: 8px;">No events yet.</div>
+            }
+        </div>
+    }
+</MudPaper>
+
+@code {
+    [Parameter] public List<Message> Messages { get; set; } = new();
+    [Parameter] public List<AgentRun> Runs { get; set; } = new();
+    [Parameter] public List<AgentDefinition> Agents { get; set; } = new();
+
+    private bool _debugLogExpanded;
+
+    private record DebugEntry(DateTime Timestamp, string Time, string Source, string Color, string Label, string Text);
+
+    private List<DebugEntry> GetDebugTimeline()
+    {
+        var entries = new List<DebugEntry>();
+
+        foreach (var msg in Messages)
+        {
+            var agentDef = Agents.FirstOrDefault(a => a.Name == msg.Sender);
+            var color = agentDef?.Color ?? ChatMessageList.GetSenderColor(msg.SenderRole);
+            entries.Add(new DebugEntry(
+                msg.CreatedAt,
+                msg.CreatedAt.ToLocalTime().ToString("HH:mm:ss"),
+                msg.Sender ?? "Unknown",
+                color,
+                $"MSG:{msg.Type}",
+                msg.Content ?? ""));
+        }
+
+        foreach (var run in Runs)
+        {
+            var agentDef = Agents.FirstOrDefault(a => a.Name == run.AgentName);
+            var color = agentDef?.Color ?? "#CDD6F4";
+
+            entries.Add(new DebugEntry(
+                run.StartedAt,
+                run.StartedAt.ToLocalTime().ToString("HH:mm:ss"),
+                run.AgentName ?? "Unknown",
+                color,
+                $"RUN:Started" + (run.ChainDepth > 0 ? $" (chain:{run.ChainDepth})" : ""),
+                run.InputPrompt ?? ""));
+
+            if (run.CompletedAt.HasValue)
+            {
+                var label = run.Status == AgentRunStatus.Failed ? "RUN:Failed" : "RUN:Completed";
+                var text = run.Status == AgentRunStatus.Failed
+                    ? (run.ErrorText ?? "")
+                    : (run.OutputText ?? "");
+
+                entries.Add(new DebugEntry(
+                    run.CompletedAt.Value,
+                    run.CompletedAt.Value.ToLocalTime().ToString("HH:mm:ss"),
+                    run.AgentName ?? "Unknown",
+                    color,
+                    label + (run.DurationMs.HasValue ? $" ({run.DurationMs}ms)" : ""),
+                    text));
+            }
+        }
+
+        return entries.OrderBy(e => e.Timestamp).ToList();
+    }
+}

@@ -1,0 +1,403 @@
+@page "/conversation/{Id}"
+@inject IConversationService ConversationService
+@inject IMessageService MessageService
+@inject IArtifactService ArtifactService
+@inject IAgentDefinitionService AgentService
+@inject IAgentRunService AgentRunService
+@inject IWorkflowEngine WorkflowEngine
+@inject IWorkflowExecutionService WorkflowExecutionService
+@inject IContextBlockService ContextBlockService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject IMarkdownService MarkdownService
+@implements IDisposable
+@using AiDevTeam.Core.Models.Workflow
+
+<PageTitle>@(_conversation?.Title ?? "Loading...")</PageTitle>
+
+@if (_conversation == null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Navigation.NavigateTo("/"))" />
+        <MudStack Spacing="0">
+            <MudText Typo="Typo.h6">@_conversation.Title</MudText>
+            <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">@_conversation.Description</MudText>
+        </MudStack>
+        <MudSpacer />
+
+        @* Workflow state badge *@
+        @if (_workflowExecution != null)
+        {
+            var (wfColor, wfIcon) = GetWorkflowStateVisual(_workflowExecution.CurrentState);
+            <MudChip T="string" Size="Size.Small"
+                     Style="@($"background-color: {wfColor}25; color: {wfColor}; border: 1px solid {wfColor}50;")">
+                <MudIcon Icon="@wfIcon" Size="Size.Small" Class="mr-1" />
+                @_workflowExecution.CurrentState
+            </MudChip>
+        }
+
+        <MudSelect T="ConversationStatus" Value="_conversation.Status" ValueChanged="OnStatusChanged"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width: 180px;">
+            @foreach (var s in Enum.GetValues<ConversationStatus>())
+            {
+                <MudSelectItem Value="s">@s</MudSelectItem>
+            }
+        </MudSelect>
+        <MudChip T="string" Color="@GetPriorityColor(_conversation.Priority)" Size="Size.Small">@_conversation.Priority</MudChip>
+        <MudTooltip Text="Delete conversation">
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                           OnClick="DeleteConversation" />
+        </MudTooltip>
+    </MudStack>
+
+    <div style="display: flex; gap: 16px; height: calc(100vh - 170px); overflow: hidden;">
+        <div style="flex: 2; display: flex; flex-direction: column; min-width: 0;">
+            <MudPaper Elevation="2" Class="pa-0" Style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+
+                <ChatMessageList Messages="_messages" Agents="_agents" ContextBlocks="_contextBlocks"
+                                 OnContextBlockClick="HandleContextBlockClick" />
+
+                <ActiveAgentIndicator AgentRuns="_agentRuns" Agents="_agents" WorkflowExecution="_workflowExecution" />
+
+                <ChatInput IsSending="_isSending"
+                           Placeholder="@GetInputPlaceholder()"
+                           ShowWaitingAlert="@(_workflowExecution?.CurrentState == WorkflowState.WaitingForInput)"
+                           HasPendingOptions="@(_workflowExecution?.PendingOptions.Any() ?? false)"
+                           OnSendMessage="SendMessage" />
+
+            </MudPaper>
+
+            <AgentRunsPanel Runs="_agentRuns" Agents="_agents" Messages="_messages"
+                            OnCancelRun="CancelRun" />
+        </div>
+
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow-y: auto;">
+
+            <WorkflowTimeline Execution="_workflowExecution" Agents="_agents" />
+
+            <ArtifactsPanel Artifacts="_artifacts" OnRefreshRequested="LoadArtifacts" />
+
+            <DebugLogPanel Messages="_messages" Runs="_agentRuns" Agents="_agents" />
+
+            @* Context Block Viewer *@
+            @if (_selectedContextBlock != null)
+            {
+                <MudPaper Elevation="3" Class="mt-3 context-viewer">
+                    <MudToolBar Dense="true" Style="background: #181825;">
+                        <MudIcon Icon="@Icons.Material.Filled.Article" Size="Size.Small" Style="color: #89B4FA;" />
+                        <MudText Typo="Typo.subtitle2" Class="ml-2" Style="color: #89B4FA;">@_selectedContextBlock.Label</MudText>
+                        <MudText Typo="Typo.caption" Class="ml-2" Style="color: var(--mud-palette-text-secondary);">
+                            by @_selectedContextBlock.AgentName
+                        </MudText>
+                        <MudSpacer />
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                       OnClick="() => _selectedContextBlock = null" />
+                    </MudToolBar>
+                    <MudDivider />
+                    <div class="artifact-content markdown-body" style="max-height: 400px; overflow-y: auto; padding: 16px;">
+                        @((MarkupString)MarkdownService.RenderToSafeHtml(_selectedContextBlock.Content))
+                    </div>
+                </MudPaper>
+            }
+
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = string.Empty;
+
+    private Conversation? _conversation;
+    private List<Message> _messages = new();
+    private List<Artifact> _artifacts = new();
+    private List<AgentRun> _agentRuns = new();
+    private List<AgentDefinition> _agents = new();
+    private WorkflowExecution? _workflowExecution;
+    private bool _isSending;
+    private bool _needsScroll;
+    private Dictionary<string, ContextBlock> _contextBlocks = new();
+    private ContextBlock? _selectedContextBlock;
+    private Timer? _refreshTimer;
+    private int _lastMessageCount;
+    private DotNetObjectReference<ConversationDetail>? _dotNetRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _agents = await AgentService.GetAllAsync();
+        await LoadConversation();
+        _lastMessageCount = _messages.Count;
+
+        // Subscribe to workflow events for real-time updates
+        WorkflowEngine.OnChatMessage += OnWorkflowChatMessage;
+        WorkflowEngine.OnStateChanged += OnWorkflowStateChanged;
+
+        _refreshTimer = new Timer(async _ =>
+        {
+            try
+            {
+                await InvokeAsync(async () =>
+                {
+                    await RefreshMessages();
+                    StateHasChanged();
+                });
+            }
+            catch { }
+        }, null, 1500, 1500);
+    }
+
+    private async Task ScrollToBottom()
+    {
+        try { await JS.InvokeVoidAsync("chatInterop.scrollToBottom", "chat-scroll-container"); }
+        catch { }
+    }
+
+    private async Task LoadConversation()
+    {
+        _conversation = await ConversationService.GetByIdAsync(Id);
+        if (_conversation == null)
+        {
+            Snackbar.Add("Conversation not found", Severity.Error);
+            Navigation.NavigateTo("/");
+            return;
+        }
+        _messages = await MessageService.GetByConversationAsync(Id);
+        _artifacts = await ArtifactService.GetByConversationAsync(Id);
+        _agentRuns = await AgentRunService.GetByConversationAsync(Id);
+        _workflowExecution = await WorkflowExecutionService.GetByConversationAsync(Id);
+        await LoadContextBlocks();
+    }
+
+    private async Task LoadContextBlocks()
+    {
+        var blocks = await ContextBlockService.GetByConversationAsync(Id);
+        _contextBlocks = blocks.ToDictionary(b => b.Id);
+    }
+
+    private async Task RefreshMessages()
+    {
+        try
+        {
+            var messages = await MessageService.GetByConversationAsync(Id);
+            var runs = await AgentRunService.GetByConversationAsync(Id);
+            var artifacts = await ArtifactService.GetByConversationAsync(Id);
+            var workflow = await WorkflowExecutionService.GetByConversationAsync(Id);
+            var hasNewMessages = messages.Count != _lastMessageCount;
+
+            var currentRunStates = string.Join(",", runs.OrderBy(r => r.Id).Select(r => $"{r.Id}:{r.Status}"));
+            var previousRunStates = string.Join(",", _agentRuns.OrderBy(r => r.Id).Select(r => $"{r.Id}:{r.Status}"));
+            var hasRunChanges = currentRunStates != previousRunStates;
+            var hasNewArtifacts = artifacts.Count != _artifacts.Count;
+            var hasWorkflowChanges = workflow?.UpdatedAt != _workflowExecution?.UpdatedAt;
+
+            if (hasNewMessages || hasRunChanges || hasNewArtifacts || hasWorkflowChanges)
+            {
+                _messages = messages;
+                _lastMessageCount = messages.Count;
+                _agentRuns = runs;
+                _artifacts = artifacts;
+                _workflowExecution = workflow;
+                await LoadContextBlocks();
+                if (hasNewMessages) _needsScroll = true;
+                StateHasChanged();
+            }
+        }
+        catch { }
+    }
+
+    private async Task LoadArtifacts()
+    {
+        _artifacts = await ArtifactService.GetByConversationAsync(Id);
+    }
+
+    private async Task SendMessage(string prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt)) return;
+
+        _isSending = true;
+
+        try
+        {
+            // Post user message
+            await MessageService.AddAsync(Id, "You", "User", MessageType.UserInstruction, prompt);
+            _messages = await MessageService.GetByConversationAsync(Id);
+            _lastMessageCount = _messages.Count;
+            _needsScroll = true;
+            StateHasChanged();
+
+            // Decide: workflow or direct chat
+            _workflowExecution = await WorkflowExecutionService.GetByConversationAsync(Id);
+
+            if (_workflowExecution?.CurrentState == WorkflowState.WaitingForInput)
+            {
+                // Workflow is waiting for user input -- continue it
+                _ = Task.Run(async () =>
+                {
+                    try { await WorkflowEngine.ContinueWorkflowAsync(Id, prompt); }
+                    catch (Exception ex) { await InvokeAsync(() => Snackbar.Add($"Workflow error: {ex.Message}", Severity.Error)); }
+                });
+            }
+            else if (_workflowExecution == null && _conversation?.TeamId != null)
+            {
+                // No workflow yet, has a team -- start workflow from chat
+                _ = Task.Run(async () =>
+                {
+                    try { await WorkflowEngine.StartWorkflowAsync(Id); }
+                    catch (Exception ex) { await InvokeAsync(() => Snackbar.Add($"Workflow error: {ex.Message}", Severity.Error)); }
+                });
+            }
+            else
+            {
+                // No team or workflow already running -- use direct chat routing
+                _ = Task.Run(async () =>
+                {
+                    try { await AgentRunService.SendMessageAsync(Id, prompt); }
+                    catch (Exception ex) { await InvokeAsync(() => Snackbar.Add($"Error: {ex.Message}", Severity.Error)); }
+                });
+            }
+
+            await ConversationService.UpdateStatusAsync(Id, ConversationStatus.InProgress);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSending = false;
+        }
+    }
+
+    // Workflow event handlers
+    private async Task OnWorkflowChatMessage(string conversationId, WorkflowChatMessage msg)
+    {
+        if (conversationId != Id) return;
+        await InvokeAsync(async () =>
+        {
+            _messages = await MessageService.GetByConversationAsync(Id);
+            _lastMessageCount = _messages.Count;
+            _needsScroll = true;
+            await LoadContextBlocks();
+            StateHasChanged();
+        });
+    }
+
+    private async Task OnWorkflowStateChanged(string conversationId, WorkflowState newState)
+    {
+        if (conversationId != Id) return;
+        await InvokeAsync(async () =>
+        {
+            _workflowExecution = await WorkflowExecutionService.GetByConversationAsync(Id);
+            _agentRuns = await AgentRunService.GetByConversationAsync(Id);
+            StateHasChanged();
+        });
+    }
+
+    private async Task CancelRun(string runId)
+    {
+        await AgentRunService.CancelRunAsync(runId);
+        Snackbar.Add("Run cancelled", Severity.Info);
+    }
+
+    private async Task OnStatusChanged(ConversationStatus newStatus)
+    {
+        if (_conversation == null) return;
+        _conversation.Status = newStatus;
+        await ConversationService.UpdateStatusAsync(Id, newStatus);
+    }
+
+    private async Task DeleteConversation()
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Delete Conversation",
+            $"Are you sure you want to delete \"{_conversation?.Title}\"? This cannot be undone.",
+            yesText: "Delete", cancelText: "Cancel");
+
+        if (confirm == true)
+        {
+            await ConversationService.DeleteAsync(Id);
+            Snackbar.Add("Conversation deleted", Severity.Success);
+            Navigation.NavigateTo("/");
+        }
+    }
+
+    private string GetInputPlaceholder()
+    {
+        if (_workflowExecution?.CurrentState == WorkflowState.WaitingForInput)
+        {
+            if (_workflowExecution.PendingOptions.Any())
+                return "Typ het nummer van je keuze of geef een antwoord...";
+            if (_workflowExecution.PendingQuestions.Any())
+                return "Beantwoord de vragen van het team...";
+            return "Het team wacht op jouw input...";
+        }
+        return "Type a message... (mention a name to talk to someone specific)";
+    }
+
+    private void HandleContextBlockClick(string blockId)
+    {
+        if (_contextBlocks.TryGetValue(blockId, out var block))
+        {
+            _selectedContextBlock = block;
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    [JSInvokable]
+    public void ShowContextBlock(string blockId)
+    {
+        HandleContextBlockClick(blockId);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("chatInterop.registerContextBlockHandler", _dotNetRef);
+            _needsScroll = true;
+        }
+
+        if (_needsScroll)
+        {
+            _needsScroll = false;
+            await ScrollToBottom();
+        }
+    }
+
+    private static (string Color, string Icon) GetWorkflowStateVisual(WorkflowState state) => state switch
+    {
+        WorkflowState.Created => ("#6C7086", Icons.Material.Filled.FiberNew),
+        WorkflowState.Analyzing => ("#F9E2AF", Icons.Material.Filled.Psychology),
+        WorkflowState.WaitingForInput => ("#89B4FA", Icons.Material.Filled.QuestionMark),
+        WorkflowState.Planned => ("#A6E3A1", Icons.Material.Filled.Checklist),
+        WorkflowState.Coding => ("#A6E3A1", Icons.Material.Filled.Code),
+        WorkflowState.Reviewing => ("#CBA6F7", Icons.Material.Filled.RateReview),
+        WorkflowState.ChangesRequested => ("#FAB387", Icons.Material.Filled.EditNote),
+        WorkflowState.Testing => ("#F38BA8", Icons.Material.Filled.Science),
+        WorkflowState.ReadyToMerge => ("#A6E3A1", Icons.Material.Filled.CheckCircle),
+        WorkflowState.Blocked => ("#F38BA8", Icons.Material.Filled.Block),
+        WorkflowState.Failed => ("#F38BA8", Icons.Material.Filled.Error),
+        WorkflowState.Completed => ("#A6E3A1", Icons.Material.Filled.Done),
+        _ => ("#CDD6F4", Icons.Material.Filled.Help)
+    };
+
+    private static Color GetPriorityColor(Priority priority) => priority switch
+    {
+        Priority.Critical => Color.Error, Priority.High => Color.Warning,
+        Priority.Medium => Color.Info, Priority.Low => Color.Default, _ => Color.Default
+    };
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+        _dotNetRef?.Dispose();
+        WorkflowEngine.OnChatMessage -= OnWorkflowChatMessage;
+        WorkflowEngine.OnStateChanged -= OnWorkflowStateChanged;
+    }
+}

@@ -1,0 +1,189 @@
+@page "/settings"
+@inject IProviderConfigurationService ProviderService
+@inject IAppSettingsService AppSettingsService
+@inject ICliDetectionService CliDetection
+@inject ISnackbar Snackbar
+
+<PageTitle>AI Dev Team - Settings</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-4">Settings</MudText>
+
+<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
+    <MudTabPanel Text="Providers" Icon="@Icons.Material.Filled.CloudQueue">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+            <MudText Typo="Typo.h6">Provider Configuration</MudText>
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+                       OnClick="DetectProviders" Disabled="_detecting">
+                @(_detecting ? "Detecting..." : "Auto-Detect CLI Tools")
+            </MudButton>
+        </MudStack>
+
+        @if (_providers == null)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else
+        {
+            <MudGrid>
+                @foreach (var provider in _providers)
+                {
+                    <MudItem xs="12" md="6">
+                        <MudPaper Elevation="1" Class="pa-4">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+                                <MudText Typo="Typo.h6">@provider.Name</MudText>
+                                @if (provider.IsDetected)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Detected</MudChip>
+                                }
+                                else
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined">Not Found</MudChip>
+                                }
+                                <MudSpacer />
+                                <MudSwitch T="bool" @bind-Value="provider.IsAvailable" Color="Color.Primary" />
+                            </MudStack>
+
+                            <MudTextField @bind-Value="provider.ExecutablePath" Label="Executable Path"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+
+                            @if (provider.AvailableModels.Any())
+                            {
+                                <MudSelect T="string" @bind-Value="provider.DefaultModel" Label="Default Model"
+                                           Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2">
+                                    @foreach (var model in provider.AvailableModels)
+                                    {
+                                        <MudSelectItem Value="@model">@model</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            }
+                            else
+                            {
+                                <MudTextField @bind-Value="provider.DefaultModel" Label="Default Model"
+                                              Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+                            }
+
+                            <MudNumericField @bind-Value="provider.DefaultTimeoutSeconds" Label="Timeout (seconds)"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" Min="30" Max="3600" Class="mb-2" />
+
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-2"
+                                       OnClick="() => SaveProvider(provider)">Save</MudButton>
+                        </MudPaper>
+                    </MudItem>
+                }
+            </MudGrid>
+        }
+    </MudTabPanel>
+
+    <MudTabPanel Text="Team Flow" Icon="@Icons.Material.Filled.AccountTree">
+        <MudText Typo="Typo.h6" Class="mb-2">Team Workflow</MudText>
+        <MudText Typo="Typo.body2" Class="mb-4" Style="color: var(--mud-palette-text-secondary);">
+            Define how agents collaborate. Each step describes what an agent does and who they report to.
+        </MudText>
+
+        <MudTextField @bind-Value="_settings.TeamFlow.Name" Label="Flow Name"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" />
+        <MudTextField @bind-Value="_settings.TeamFlow.Description" Label="Flow Description"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mb-3" />
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Steps</MudText>
+        @for (var i = 0; i < _settings.TeamFlow.Steps.Count; i++)
+        {
+            var step = _settings.TeamFlow.Steps[i];
+            var idx = i;
+            <MudPaper Elevation="1" Class="pa-3 mb-2">
+                <MudGrid>
+                    <MudItem xs="1">
+                        <MudText Typo="Typo.h6" Style="color: var(--mud-palette-text-secondary);">@(idx + 1)</MudText>
+                    </MudItem>
+                    <MudItem xs="3">
+                        <MudTextField @bind-Value="step.AgentRole" Label="Agent Role" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="4">
+                        <MudTextField @bind-Value="step.Action" Label="Action" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="3">
+                        <MudTextField @bind-Value="step.ReportsTo" Label="Reports To" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="1">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                       OnClick="() => _settings.TeamFlow.Steps.RemoveAt(idx)" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        }
+
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" Class="mb-3"
+                   OnClick='() => _settings.TeamFlow.Steps.Add(new AiDevTeam.Core.Models.FlowStep { Order = _settings.TeamFlow.Steps.Count + 1 })'>
+            Add Step
+        </MudButton>
+
+        <br />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSettings">Save Team Flow</MudButton>
+    </MudTabPanel>
+
+    <MudTabPanel Text="Communication" Icon="@Icons.Material.Filled.Chat">
+        <MudText Typo="Typo.h6" Class="mb-3">Communication Style</MudText>
+        <MudSelect T="string" @bind-Value="_settings.DefaultCommunicationStyle" Label="Default Style"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" Style="max-width: 300px;">
+            <MudSelectItem Value="@("professional")">Professional</MudSelectItem>
+            <MudSelectItem Value="@("casual")">Casual</MudSelectItem>
+            <MudSelectItem Value="@("terse")">Terse / Concise</MudSelectItem>
+            <MudSelectItem Value="@("verbose")">Verbose / Detailed</MudSelectItem>
+            <MudSelectItem Value="@("friendly")">Friendly / Warm</MudSelectItem>
+        </MudSelect>
+        <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);" Class="mb-3">
+            This sets the default communication style for all agents. Individual agents can override this in their configuration.
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSettings">Save</MudButton>
+    </MudTabPanel>
+
+    <MudTabPanel Text="About" Icon="@Icons.Material.Filled.Info">
+        <MudText Typo="Typo.h6" Class="mb-3">AI Dev Team Workspace</MudText>
+        <MudText Typo="Typo.body1" Class="mb-2">Version 1.0.0</MudText>
+        <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+            A local AI team workspace for managing conversations with multiple AI agents.
+            All data is stored as JSON files in the .aidevteam directory.
+        </MudText>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private List<ProviderConfiguration>? _providers;
+    private AppSettings _settings = new();
+    private bool _detecting;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _providers = await ProviderService.GetAllAsync();
+        _settings = await AppSettingsService.GetAsync();
+    }
+
+    private async Task DetectProviders()
+    {
+        _detecting = true;
+        try
+        {
+            await ProviderService.RefreshDetectionAsync();
+            _providers = await ProviderService.GetAllAsync();
+            Snackbar.Add("CLI tools detected", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Detection failed: {ex.Message}", Severity.Error);
+        }
+        finally { _detecting = false; }
+    }
+
+    private async Task SaveProvider(ProviderConfiguration provider)
+    {
+        await ProviderService.SaveAsync(provider);
+        Snackbar.Add($"Provider '{provider.Name}' saved", Severity.Success);
+    }
+
+    private async Task SaveSettings()
+    {
+        await AppSettingsService.SaveAsync(_settings);
+        Snackbar.Add("Settings saved", Severity.Success);
+    }
+}

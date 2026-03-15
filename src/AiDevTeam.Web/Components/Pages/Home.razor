@@ -1,0 +1,221 @@
+@page "/"
+@page "/conversations"
+@inject IConversationService ConversationService
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>AI Dev Team - Conversations</PageTitle>
+
+<MudGrid>
+    <MudItem xs="12">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+            <MudText Typo="Typo.h5">Conversations</MudText>
+            <MudSpacer />
+
+            @if (_selectionMode)
+            {
+                <MudText Typo="Typo.body2" Class="mr-2">@_selectedIds.Count selected</MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
+                           OnClick="DeleteSelected" Disabled="@(!_selectedIds.Any())">Delete Selected</MudButton>
+                <MudButton Variant="Variant.Outlined" OnClick="ToggleSelectionMode">Cancel</MudButton>
+            }
+            else
+            {
+                <MudTextField @bind-Value="_searchText" Placeholder="Search..." Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Class="mr-4" Style="max-width: 300px;" Immediate="true" />
+                <MudTooltip Text="Select conversations">
+                    <MudIconButton Icon="@Icons.Material.Filled.ChecklistRtl" OnClick="ToggleSelectionMode" />
+                </MudTooltip>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="CreateConversation">New Conversation</MudButton>
+            }
+        </MudStack>
+    </MudItem>
+
+    <MudItem xs="12">
+        <MudStack Row="true" Spacing="2" Class="mb-3">
+            <MudChip T="string" Color="@(_statusFilter == null ? Color.Primary : Color.Default)" OnClick="() => _statusFilter = null">All</MudChip>
+            @foreach (var status in Enum.GetValues<ConversationStatus>())
+            {
+                var s = status;
+                <MudChip T="string" Color="@(_statusFilter == s ? Color.Primary : Color.Default)"
+                         OnClick="() => _statusFilter = s">@FormatStatus(s)</MudChip>
+            }
+        </MudStack>
+    </MudItem>
+
+    @if (_conversations == null)
+    {
+        <MudItem xs="12">
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        </MudItem>
+    }
+    else
+    {
+        @foreach (var conv in FilteredConversations)
+        {
+            <MudItem xs="12" sm="6" md="4">
+                <MudCard Elevation="2" Style="height: 100%; position: relative;"
+                         Class="@(_selectedIds.Contains(conv.Id) ? "selected-card" : "")">
+
+                    @if (_selectionMode)
+                    {
+                        <div style="position: absolute; top: 8px; right: 8px; z-index: 1;">
+                            <MudCheckBox T="bool" Value="@_selectedIds.Contains(conv.Id)"
+                                         ValueChanged="@((bool v) => ToggleSelection(conv.Id, v))"
+                                         Color="Color.Primary" />
+                        </div>
+                    }
+
+                    <div class="cursor-pointer" @onclick="() => OnCardClick(conv.Id)">
+                        <MudCardHeader>
+                            <CardHeaderContent>
+                                <MudStack Row="true" AlignItems="AlignItems.Center">
+                                    <MudText Typo="Typo.h6" Style="flex: 1;">@conv.Title</MudText>
+                                    <MudChip T="string" Size="Size.Small" Class="@GetStatusClass(conv.Status)">@FormatStatus(conv.Status)</MudChip>
+                                </MudStack>
+                            </CardHeaderContent>
+                        </MudCardHeader>
+                        <MudCardContent>
+                            <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--mud-palette-text-secondary);">
+                                @(conv.Description.Length > 120 ? conv.Description[..120] + "..." : conv.Description)
+                            </MudText>
+                            <MudStack Row="true" Spacing="2">
+                                @if (!string.IsNullOrEmpty(conv.Tags))
+                                {
+                                    @foreach (var tag in conv.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(3))
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@tag</MudChip>
+                                    }
+                                }
+                            </MudStack>
+                        </MudCardContent>
+                        <MudCardActions>
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Style="width: 100%; padding: 0 8px;">
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Icon="@Icons.Material.Filled.Flag"
+                                         Color="@GetPriorityColor(conv.Priority)">@conv.Priority</MudChip>
+                                <MudSpacer />
+                                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
+                                    @conv.UpdatedAt.ToLocalTime().ToString("MMM dd, HH:mm")
+                                </MudText>
+                            </MudStack>
+                        </MudCardActions>
+                    </div>
+                </MudCard>
+            </MudItem>
+        }
+
+        @if (!FilteredConversations.Any())
+        {
+            <MudItem xs="12">
+                <MudAlert Severity="Severity.Info">No conversations found. Create one to get started.</MudAlert>
+            </MudItem>
+        }
+    }
+</MudGrid>
+
+@code {
+    private List<Conversation>? _conversations;
+    private string _searchText = string.Empty;
+    private ConversationStatus? _statusFilter;
+    private bool _selectionMode;
+    private HashSet<string> _selectedIds = new();
+
+    private IEnumerable<Conversation> FilteredConversations =>
+        (_conversations ?? Enumerable.Empty<Conversation>())
+            .Where(c => _statusFilter == null || c.Status == _statusFilter)
+            .Where(c => string.IsNullOrEmpty(_searchText) ||
+                        c.Title.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                        c.Description.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                        (c.Tags?.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ?? false));
+
+    protected override async Task OnInitializedAsync()
+    {
+        _conversations = await ConversationService.GetAllAsync();
+    }
+
+    private async Task CreateConversation()
+    {
+        var parameters = new DialogParameters<NewConversationDialog>();
+        var dialog = await DialogService.ShowAsync<NewConversationDialog>("New Conversation", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is Conversation conv)
+        {
+            Navigation.NavigateTo($"/conversation/{conv.Id}");
+        }
+    }
+
+    private void OnCardClick(string id)
+    {
+        if (_selectionMode)
+        {
+            if (!_selectedIds.Remove(id))
+                _selectedIds.Add(id);
+        }
+        else
+        {
+            Navigation.NavigateTo($"/conversation/{id}");
+        }
+    }
+
+    private void ToggleSelectionMode()
+    {
+        _selectionMode = !_selectionMode;
+        if (!_selectionMode)
+            _selectedIds.Clear();
+    }
+
+    private void ToggleSelection(string id, bool selected)
+    {
+        if (selected) _selectedIds.Add(id);
+        else _selectedIds.Remove(id);
+    }
+
+    private async Task DeleteSelected()
+    {
+        var count = _selectedIds.Count;
+        var confirm = await DialogService.ShowMessageBox(
+            "Delete Conversations",
+            $"Are you sure you want to delete {count} conversation(s)? This cannot be undone.",
+            yesText: "Delete", cancelText: "Cancel");
+
+        if (confirm == true)
+        {
+            foreach (var id in _selectedIds.ToList())
+            {
+                await ConversationService.DeleteAsync(id);
+            }
+            _selectedIds.Clear();
+            _selectionMode = false;
+            _conversations = await ConversationService.GetAllAsync();
+            Snackbar.Add($"{count} conversation(s) deleted", Severity.Success);
+        }
+    }
+
+    private static string FormatStatus(ConversationStatus status) => status switch
+    {
+        ConversationStatus.New => "New",
+        ConversationStatus.InProgress => "In Progress",
+        ConversationStatus.WaitingForInput => "Waiting",
+        ConversationStatus.InReview => "In Review",
+        ConversationStatus.Completed => "Completed",
+        ConversationStatus.Failed => "Failed",
+        ConversationStatus.Blocked => "Blocked",
+        _ => status.ToString()
+    };
+
+    private static string GetStatusClass(ConversationStatus status) =>
+        $"status-chip status-{status.ToString().ToLowerInvariant()}";
+
+    private static Color GetPriorityColor(Priority priority) => priority switch
+    {
+        Priority.Critical => Color.Error,
+        Priority.High => Color.Warning,
+        Priority.Medium => Color.Info,
+        Priority.Low => Color.Default,
+        _ => Color.Default
+    };
+}

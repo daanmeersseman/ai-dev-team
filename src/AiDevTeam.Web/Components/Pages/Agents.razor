@@ -1,0 +1,130 @@
+@page "/agents"
+@inject IAgentDefinitionService AgentService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>AI Dev Team - Agents</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h5">Agent Configuration</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="AddAgent">New Agent</MudButton>
+</MudStack>
+
+@if (_agents == null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid>
+        @foreach (var agent in _agents)
+        {
+            <MudItem xs="12" sm="6" md="4">
+                <MudCard Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderAvatar>
+                            <MudAvatar Style="@($"background-color: {agent.Color}")">
+                                @(agent.AvatarInitials ?? agent.Name[..Math.Min(2, agent.Name.Length)].ToUpper())
+                            </MudAvatar>
+                        </CardHeaderAvatar>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">@agent.Name</MudText>
+                            <MudText Typo="Typo.caption">@agent.Role</MudText>
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            <MudSwitch T="bool" Value="agent.IsEnabled" Color="Color.Primary"
+                                       ValueChanged="(v) => ToggleAgent(agent, v)" />
+                        </CardHeaderActions>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudText Typo="Typo.body2" Class="mb-2">@agent.Description</MudText>
+                        @if (!string.IsNullOrEmpty(agent.Personality))
+                        {
+                            <MudText Typo="Typo.caption" Class="mb-1" Style="color: var(--mud-palette-text-secondary);">
+                                <b>Personality:</b> @agent.Personality
+                            </MudText>
+                        }
+                        <MudStack Spacing="1">
+                            <MudStack Row="true" AlignItems="AlignItems.Center">
+                                <MudIcon Icon="@Icons.Material.Filled.CloudQueue" Size="Size.Small" />
+                                <MudText Typo="Typo.caption">@agent.ProviderType</MudText>
+                            </MudStack>
+                            <MudStack Row="true" AlignItems="AlignItems.Center">
+                                <MudIcon Icon="@Icons.Material.Filled.ChatBubbleOutline" Size="Size.Small" />
+                                <MudText Typo="Typo.caption">Style: @agent.CommunicationStyle</MudText>
+                            </MudStack>
+                        </MudStack>
+                        <MudStack Row="true" Spacing="1" Class="mt-2">
+                            @if (agent.CanCreateArtifacts)
+                            { <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success">Artifacts</MudChip> }
+                            @if (agent.CanTriggerAgents)
+                            { <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">Trigger</MudChip> }
+                            @if (agent.CanExecuteCommands)
+                            { <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">Commands</MudChip> }
+                        </MudStack>
+                    </MudCardContent>
+                    <MudCardActions>
+                        <MudButton StartIcon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAgent(agent)">Edit</MudButton>
+                        <MudSpacer />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="() => DeleteAgent(agent)" />
+                    </MudCardActions>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@code {
+    private List<AgentDefinition>? _agents;
+
+    protected override async Task OnInitializedAsync() => await LoadAgents();
+
+    private async Task LoadAgents() => _agents = await AgentService.GetAllAsync();
+
+    private async Task AddAgent()
+    {
+        var parameters = new DialogParameters<AgentEditorDialog>
+        {
+            { x => x.Agent, new AgentDefinition() },
+            { x => x.IsNew, true }
+        };
+        var dialog = await DialogService.ShowAsync<AgentEditorDialog>("New Agent", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled) await LoadAgents();
+    }
+
+    private async Task EditAgent(AgentDefinition agent)
+    {
+        var parameters = new DialogParameters<AgentEditorDialog>
+        {
+            { x => x.Agent, agent },
+            { x => x.IsNew, false }
+        };
+        var dialog = await DialogService.ShowAsync<AgentEditorDialog>("Edit Agent", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled) await LoadAgents();
+    }
+
+    private async Task DeleteAgent(AgentDefinition agent)
+    {
+        var confirmed = await DialogService.ShowMessageBox("Delete Agent",
+            $"Are you sure you want to delete '{agent.Name}'?", yesText: "Delete", cancelText: "Cancel");
+        if (confirmed == true)
+        {
+            await AgentService.DeleteAsync(agent.Id);
+            Snackbar.Add("Agent deleted", Severity.Success);
+            await LoadAgents();
+        }
+    }
+
+    private async Task ToggleAgent(AgentDefinition agent, bool enabled)
+    {
+        agent.IsEnabled = enabled;
+        await AgentService.UpdateAsync(agent);
+    }
+}

@@ -1,0 +1,114 @@
+@using AiDevTeam.Core.Models.Workflow
+
+@if (Execution != null && Execution.Steps.Any())
+{
+    <MudPaper Elevation="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="pa-2 cursor-pointer"
+                  @onclick="() => _timelineExpanded = !_timelineExpanded">
+            <MudIcon Icon="@Icons.Material.Filled.Timeline" Size="Size.Small" Style="color: #89B4FA;" />
+            <MudText Typo="Typo.subtitle2" Style="color: #89B4FA;">Workflow Timeline</MudText>
+            <MudSpacer />
+            <MudIcon Icon="@(_timelineExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small" />
+        </MudStack>
+
+        @if (_timelineExpanded)
+        {
+            <MudDivider />
+            <div style="max-height: 350px; overflow-y: auto; padding: 8px;">
+                @foreach (var step in Execution.Steps)
+                {
+                    var agentDef = Agents.FirstOrDefault(a => a.Name == step.AgentName);
+                    var stepColor = agentDef?.Color ?? "#CDD6F4";
+                    var (statusIcon, statusColor) = GetStepStatusVisual(step.Status);
+
+                    <div style="display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid #1e1e2e;">
+                        <div style="display: flex; flex-direction: column; align-items: center; min-width: 32px;">
+                            <MudAvatar Size="Size.Small" Style="@($"background-color: {stepColor}; width:24px; height:24px; font-size:0.6rem;")">
+                                @(agentDef?.AvatarInitials ?? step.AgentName[..1])
+                            </MudAvatar>
+                            @if (step != Execution.Steps.Last())
+                            {
+                                <div style="width: 2px; flex: 1; background: #313244; margin-top: 4px;"></div>
+                            }
+                        </div>
+                        <div style="flex: 1; min-width: 0;">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                <MudText Typo="Typo.body2" Style="@($"color: {stepColor}; font-weight: 600;")">
+                                    @(step.AgentName.Split(' ', '(')[0].Trim())
+                                </MudText>
+                                <MudIcon Icon="@statusIcon" Size="Size.Small" Style="@($"color: {statusColor}; font-size: 14px;")" />
+                                @if (step.DurationMs.HasValue)
+                                {
+                                    <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
+                                        @(step.DurationMs / 1000.0)s
+                                    </MudText>
+                                }
+                            </MudStack>
+                            <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
+                                @step.Action
+                            </MudText>
+                            @if (!string.IsNullOrEmpty(step.ErrorMessage))
+                            {
+                                <MudText Typo="Typo.caption" Style="color: #F38BA8;">
+                                    @step.ErrorMessage
+                                </MudText>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
+            @* Decision log *@
+            @if (Execution.Decisions.Any())
+            {
+                <MudDivider />
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="pa-2 cursor-pointer"
+                          @onclick="() => _decisionsExpanded = !_decisionsExpanded">
+                    <MudIcon Icon="@Icons.Material.Filled.Gavel" Size="Size.Small" Style="color: #F9E2AF;" />
+                    <MudText Typo="Typo.caption" Style="color: #F9E2AF; font-weight: 600;">
+                        Decisions (@Execution.Decisions.Count)
+                    </MudText>
+                    <MudSpacer />
+                    <MudIcon Icon="@(_decisionsExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small" />
+                </MudStack>
+
+                @if (_decisionsExpanded)
+                {
+                    <div style="max-height: 200px; overflow-y: auto; padding: 4px 8px; font-size: 0.72rem; background: #11111B;">
+                        @foreach (var d in Execution.Decisions.OrderByDescending(x => x.Timestamp))
+                        {
+                            <div style="padding: 2px 0; border-bottom: 1px solid #1e1e2e;">
+                                <span style="color: #6C7086;">@d.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
+                                <span style="color: #CBA6F7; font-weight: 600;"> @d.DecisionMaker</span>
+                                <span style="color: #9399B2;"> @d.Type:</span>
+                                <span style="color: #CDD6F4;"> @d.Reason</span>
+                                @if (d.FromState.HasValue && d.ToState.HasValue)
+                                {
+                                    <span style="color: #6C7086;"> (@d.FromState → @d.ToState)</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        }
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public WorkflowExecution? Execution { get; set; }
+    [Parameter] public List<AgentDefinition> Agents { get; set; } = new();
+
+    private bool _timelineExpanded = true;
+    private bool _decisionsExpanded;
+
+    private static (string Icon, string Color) GetStepStatusVisual(WorkflowStepStatus status) => status switch
+    {
+        WorkflowStepStatus.Pending => (Icons.Material.Filled.Schedule, "#6C7086"),
+        WorkflowStepStatus.Running => (Icons.Material.Filled.PlayCircle, "#89B4FA"),
+        WorkflowStepStatus.Succeeded => (Icons.Material.Filled.CheckCircle, "#A6E3A1"),
+        WorkflowStepStatus.Failed => (Icons.Material.Filled.Error, "#F38BA8"),
+        WorkflowStepStatus.Skipped => (Icons.Material.Filled.SkipNext, "#6C7086"),
+        _ => (Icons.Material.Filled.Help, "#CDD6F4")
+    };
+}

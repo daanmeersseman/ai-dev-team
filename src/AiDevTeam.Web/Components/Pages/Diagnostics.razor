@@ -1,0 +1,248 @@
+@page "/diagnostics"
+@inject IAgentHealthService HealthService
+@inject ISnackbar Snackbar
+@inject IAgentDefinitionService AgentService
+
+<PageTitle>AI Dev Team - Diagnostics</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h5">System Diagnostics</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+               OnClick="RefreshHealth" Disabled="_loading">
+        @if (_loading)
+        {
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+            <span class="ml-2">Checking...</span>
+        }
+        else
+        {
+            <span>Refresh Health</span>
+        }
+    </MudButton>
+</MudStack>
+
+@if (_healthStatuses == null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid>
+        <MudItem xs="12">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Agent Health Status</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    @if (!_healthStatuses.Any())
+                    {
+                        <MudAlert Severity="Severity.Info">No agents configured</MudAlert>
+                    }
+                    else
+                    {
+                        <MudTable Items="_healthStatuses" Dense="true" Hover="true" Striped="true">
+                            <HeaderContent>
+                                <MudTh>Agent</MudTh>
+                                <MudTh>Status</MudTh>
+                                <MudTh>Configuration</MudTh>
+                                <MudTh>Provider</MudTh>
+                                <MudTh>Executable</MudTh>
+                                <MudTh>Response Time</MudTh>
+                                <MudTh>Last Check</MudTh>
+                                <MudTh>Error</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd DataLabel="Agent">
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                        <MudIcon Icon="@GetHealthIcon(context.IsHealthy)" 
+                                                Color="@GetHealthColor(context.IsHealthy)" Size="Size.Small" />
+                                        <MudText>@context.AgentName</MudText>
+                                    </MudStack>
+                                </MudTd>
+                                <MudTd DataLabel="Status">
+                                    <MudChip T="string" Color="@GetHealthColor(context.IsHealthy)" Size="Size.Small">
+                                        @(context.IsHealthy ? "Healthy" : "Unhealthy")
+                                    </MudChip>
+                                </MudTd>
+                                <MudTd DataLabel="Configuration">
+                                    <MudIcon Icon="@(context.IsConfigurationValid ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
+                                            Color="@(context.IsConfigurationValid ? Color.Success : Color.Error)" Size="Size.Small" />
+                                </MudTd>
+                                <MudTd DataLabel="Provider">
+                                    <MudIcon Icon="@(context.IsProviderAvailable ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
+                                            Color="@(context.IsProviderAvailable ? Color.Success : Color.Error)" Size="Size.Small" />
+                                </MudTd>
+                                <MudTd DataLabel="Executable">
+                                    <MudIcon Icon="@(context.IsExecutableAccessible ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
+                                            Color="@(context.IsExecutableAccessible ? Color.Success : Color.Error)" Size="Size.Small" />
+                                </MudTd>
+                                <MudTd DataLabel="Response Time">
+                                    @if (context.LastResponseTime.HasValue)
+                                    {
+                                        <MudText Typo="Typo.body2">@($"{context.LastResponseTime.Value.TotalMilliseconds:F0}ms")</MudText>
+                                    }
+                                    else
+                                    {
+                                        <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-disabled)">N/A</MudText>
+                                    }
+                                </MudTd>
+                                <MudTd DataLabel="Last Check">
+                                    <MudText Typo="Typo.caption">@context.CheckedAt.ToString("HH:mm:ss")</MudText>
+                                </MudTd>
+                                <MudTd DataLabel="Error">
+                                    @if (!string.IsNullOrEmpty(context.ErrorMessage))
+                                    {
+                                        <MudTooltip Text="@context.ErrorMessage">
+                                            <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Small" />
+                                        </MudTooltip>
+                                    }
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        <MudItem xs="12" md="6">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">System Summary</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudStack Spacing="2">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText>Total Agents:</MudText>
+                            <MudChip T="string" Color="Color.Info" Size="Size.Small">@_healthStatuses?.Count</MudChip>
+                        </MudStack>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText>Healthy Agents:</MudText>
+                            <MudChip T="string" Color="Color.Success" Size="Size.Small">@_healthStatuses?.Count(h => h.IsHealthy)</MudChip>
+                        </MudStack>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText>Unhealthy Agents:</MudText>
+                            <MudChip T="string" Color="Color.Error" Size="Size.Small">@_healthStatuses?.Count(h => !h.IsHealthy)</MudChip>
+                        </MudStack>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText>Configuration Issues:</MudText>
+                            <MudChip T="string" Color="Color.Warning" Size="Size.Small">@_healthStatuses?.Count(h => !h.IsConfigurationValid)</MudChip>
+                        </MudStack>
+                    </MudStack>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        <MudItem xs="12" md="6">
+            <MudCard Elevation="2">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Quick Actions</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudStack Spacing="2">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" 
+                                  StartIcon="@Icons.Material.Filled.Settings" 
+                                  Href="/agents" FullWidth="true">
+                            Configure Agents
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" 
+                                  StartIcon="@Icons.Material.Filled.BugReport" 
+                                  OnClick="ExportDiagnostics" FullWidth="true">
+                            Export Diagnostics
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Info" 
+                                  StartIcon="@Icons.Material.Filled.Refresh" 
+                                  OnClick="RefreshHealth" FullWidth="true"
+                                  Disabled="_loading">
+                            Refresh All
+                        </MudButton>
+                    </MudStack>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+
+    @if (_healthStatuses.Any(h => !h.IsHealthy))
+    {
+        <MudItem xs="12" Class="mt-4">
+            <MudAlert Severity="Severity.Warning">
+                <MudText>
+                    <strong>Issues Detected:</strong> Some agents are not functioning properly. 
+                    Check the configuration and ensure all required CLI tools are installed and accessible.
+                </MudText>
+            </MudAlert>
+        </MudItem>
+    }
+}
+
+@code {
+    private List<AgentHealthStatus>? _healthStatuses;
+    private bool _loading = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshHealth();
+    }
+
+    private async Task RefreshHealth()
+    {
+        _loading = true;
+        try
+        {
+            _healthStatuses = await HealthService.CheckAllAgentsHealthAsync();
+            var unhealthyCount = _healthStatuses.Count(h => !h.IsHealthy);
+            
+            if (unhealthyCount > 0)
+            {
+                Snackbar.Add($"Health check completed: {unhealthyCount} agent(s) have issues", Severity.Warning);
+            }
+            else
+            {
+                Snackbar.Add("Health check completed: All agents are healthy", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Health check failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ExportDiagnostics()
+    {
+        try
+        {
+            // Simple diagnostic export - in a real app you might generate a detailed report
+            var diagnostics = new
+            {
+                Timestamp = DateTime.UtcNow,
+                HealthStatuses = _healthStatuses
+            };
+            
+            Snackbar.Add("Diagnostic export feature would be implemented here", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Export failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static string GetHealthIcon(bool isHealthy)
+    {
+        return isHealthy ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error;
+    }
+
+    private static Color GetHealthColor(bool isHealthy)
+    {
+        return isHealthy ? Color.Success : Color.Error;
+    }
+}

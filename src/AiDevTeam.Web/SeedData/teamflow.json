@@ -1,0 +1,63 @@
+{
+  "name": "Default Development Flow",
+  "description": "Standard flow: Tech Lead analyzes, Coder implements, Reviewer reviews, Tester validates.",
+  "maxReviewCycles": 3,
+  "maxRetriesPerStep": 2,
+  "requireUserApprovalBeforeCoding": true,
+  "runTestsAfterReview": true,
+  "defaultCommunicationStyle": "professional",
+  "steps": [
+    {
+      "order": 1,
+      "agentRole": "Orchestrator",
+      "action": "Analyze the task, identify approach options, and create an implementation plan",
+      "reportsTo": "User",
+      "chatTemplate": "Ik ga deze taak analyseren en een plan opstellen.",
+      "requiredCapability": "Reasoning"
+    },
+    {
+      "order": 2,
+      "agentRole": "DatabaseSpecialist",
+      "action": "Analyze database impact: schema changes, migrations, query performance",
+      "reportsTo": "Orchestrator",
+      "condition": "if data changes needed",
+      "isOptional": true,
+      "chatTemplate": "{agent}, kun je de database-impact bekijken voor '{taskTitle}'?",
+      "requiredCapability": "DatabaseDesign"
+    },
+    {
+      "order": 3,
+      "agentRole": "Coder",
+      "action": "Implement the changes according to the plan, write clean production code",
+      "reportsTo": "Orchestrator",
+      "chatTemplate": "{agent}, kun je dit implementeren? {summary}",
+      "requiredCapability": "Coding"
+    },
+    {
+      "order": 4,
+      "agentRole": "Reviewer",
+      "action": "Review the implementation for correctness, security, maintainability, and best practices",
+      "reportsTo": "Orchestrator",
+      "nextStepOnSuccess": 5,
+      "nextStepOnChangesRequested": 3,
+      "chatTemplate": "{agent}, kun je de wijzigingen van {previousAgent} reviewen?",
+      "requiredCapability": "Review"
+    },
+    {
+      "order": 5,
+      "agentRole": "Tester",
+      "action": "Write and run tests to validate the implementation covers all requirements",
+      "reportsTo": "Orchestrator",
+      "chatTemplate": "{agent}, kun je tests schrijven en uitvoeren voor deze implementatie?",
+      "requiredCapability": "Testing"
+    },
+    {
+      "order": 6,
+      "agentRole": "Orchestrator",
+      "action": "Summarize all results, compile final status, and report back",
+      "reportsTo": "User",
+      "chatTemplate": "Alle stappen zijn afgerond. Hier is mijn samenvatting.",
+      "requiredCapability": "Reasoning"
+    }
+  ]
+}

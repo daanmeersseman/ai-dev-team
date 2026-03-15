@@ -1,0 +1,91 @@
+@using AiDevTeam.Core.Models.Workflow
+
+@{
+    var activeRuns = AgentRuns.Where(r => r.Status == AgentRunStatus.Running || r.Status == AgentRunStatus.Queued).ToList();
+    var activeStep = WorkflowExecution?.Steps.LastOrDefault(s => s.Status == WorkflowStepStatus.Running);
+}
+
+@if (activeRuns.Any() || activeStep != null)
+{
+    <div class="active-agent-bar">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <div class="typing-indicator">
+                <span></span><span></span><span></span>
+            </div>
+            @if (activeStep != null)
+            {
+                var ad = Agents.FirstOrDefault(a => a.Name == activeStep.AgentName);
+                var ac = ad?.Color ?? "#CDD6F4";
+                <MudAvatar Size="Size.Small" Style="@($"background-color: {ac}; width:24px; height:24px; font-size:0.65rem;")">
+                    @(ad?.AvatarInitials ?? activeStep.AgentName[..1])
+                </MudAvatar>
+                <MudText Typo="Typo.body2" Style="@($"color: {ac}; font-weight: 600;")">
+                    @(activeStep.AgentName.Split(' ', '(')[0].Trim())
+                </MudText>
+                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
+                    @activeStep.Action
+                </MudText>
+            }
+            else
+            {
+                @foreach (var active in activeRuns)
+                {
+                    var ad = Agents.FirstOrDefault(a => a.Name == active.AgentName);
+                    var ac = ad?.Color ?? "#CDD6F4";
+                    <MudAvatar Size="Size.Small" Style="@($"background-color: {ac}; width:24px; height:24px; font-size:0.65rem;")">
+                        @(ad?.AvatarInitials ?? (active.AgentName ?? "?")[..1])
+                    </MudAvatar>
+                    <MudText Typo="Typo.body2" Style="@($"color: {ac}; font-weight: 600;")">
+                        @(active.AgentName?.Split(' ', '(')[0].Trim() ?? "Agent")
+                    </MudText>
+                }
+                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">is aan het werk...</MudText>
+            }
+
+            @if (activeStep?.StartedAt != null)
+            {
+                <MudSpacer />
+                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
+                    @((DateTime.UtcNow - activeStep.StartedAt.Value).TotalSeconds.ToString("F0"))s
+                </MudText>
+            }
+        </MudStack>
+    </div>
+}
+
+<style>
+    .active-agent-bar {
+        padding: 6px 12px;
+        background: #181825;
+        border-top: 1px solid #313244;
+    }
+
+    .typing-indicator {
+        display: flex;
+        gap: 3px;
+        align-items: center;
+        padding: 0 4px;
+    }
+
+    .typing-indicator span {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #89B4FA;
+        animation: typing-bounce 1.4s infinite ease-in-out both;
+    }
+
+    .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+    .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+
+    @@keyframes typing-bounce {
+        0%, 80%, 100% { transform: scale(0.5); opacity: 0.4; }
+        40% { transform: scale(1.0); opacity: 1.0; }
+    }
+</style>
+
+@code {
+    [Parameter] public List<AgentRun> AgentRuns { get; set; } = new();
+    [Parameter] public List<AgentDefinition> Agents { get; set; } = new();
+    [Parameter] public WorkflowExecution? WorkflowExecution { get; set; }
+}

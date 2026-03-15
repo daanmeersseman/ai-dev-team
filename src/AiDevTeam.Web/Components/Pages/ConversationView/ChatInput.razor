@@ -1,0 +1,56 @@
+@using AiDevTeam.Core.Models.Workflow
+
+<div class="chat-input-area">
+    @if (ShowWaitingAlert)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2" NoIcon="false">
+            Het team wacht op jouw input
+            @if (HasPendingOptions)
+            {
+                <text> — kies een optie of typ je antwoord</text>
+            }
+        </MudAlert>
+    }
+    <MudStack Row="true" Spacing="2">
+        <MudTextField @ref="_inputField" T="string" Value="@_inputText" ValueChanged="@OnInputChanged"
+                      Placeholder="@Placeholder"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;"
+                      OnKeyDown="OnKeyDown" Immediate="true" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="HandleSend"
+                   Disabled="@(string.IsNullOrWhiteSpace(_inputText) || IsSending)"
+                   StartIcon="@Icons.Material.Filled.Send">Send</MudButton>
+    </MudStack>
+</div>
+
+@code {
+    [Parameter] public bool IsSending { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "Type a message...";
+    [Parameter] public bool ShowWaitingAlert { get; set; }
+    [Parameter] public bool HasPendingOptions { get; set; }
+    [Parameter] public EventCallback<string> OnSendMessage { get; set; }
+
+    private MudTextField<string>? _inputField;
+    private string _inputText = string.Empty;
+
+    private void OnInputChanged(string value)
+    {
+        _inputText = value;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+            await HandleSend();
+    }
+
+    private async Task HandleSend()
+    {
+        if (string.IsNullOrWhiteSpace(_inputText) || IsSending) return;
+        var text = _inputText;
+        _inputText = string.Empty;
+        if (_inputField != null)
+            await _inputField.SetText(string.Empty);
+        StateHasChanged();
+        await OnSendMessage.InvokeAsync(text);
+    }
+}

@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AiDevTeam.Core/AiDevTeam.Core.csproj" />
+    <Project Path="src/AiDevTeam.Infrastructure/AiDevTeam.Infrastructure.csproj" />
+    <Project Path="src/AiDevTeam.Providers/AiDevTeam.Providers.csproj" />
+    <Project Path="src/AiDevTeam.Web/AiDevTeam.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AiDevTeam.Tests/AiDevTeam.Tests.csproj" />
+  </Folder>
+</Solution>
